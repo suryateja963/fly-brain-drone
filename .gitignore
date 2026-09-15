@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Webots
+*.wbproj
+worlds/.*.wbproj
+worlds/*.wbt.bak
+
+# Recordings and figures
+recordings/
+*.mp4
+*.png
+!docs/*.png
