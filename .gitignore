@@ -9,6 +9,11 @@ venv/
 worlds/.*.wbproj
 worlds/*.wbt.bak
 
+# A Webots install inside the project folder. 250MB of third-party binaries
+# that must never reach the repo — the installer defaults here if you point
+# it at the project directory.
+/Webots/
+
 # Recordings and figures
 recordings/
 *.mp4
