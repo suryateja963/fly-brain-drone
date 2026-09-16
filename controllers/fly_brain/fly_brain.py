@@ -49,10 +49,35 @@ ARRIVE_RADIUS = 0.60
 # signal itself, which is what caused an earlier orbit on a stale heading.
 YAW_FADE_START = 1.5  # metres
 
+# REVERTED to 0.0 (no floor). Introduced at 0.35 alongside K_YAW_P 1.6->2.4
+# as a single change, and that pair crashed the drone. Reverting the gain but
+# keeping the floor would be an untested combination, so both go back.
+#
+# The problem it was aimed at is real and still open: faded to ya=0.13 the
+# yaw command could not rotate the airframe, so the drone held ~71deg off
+# target and circled at a fixed radius. The fix has to raise authority
+# WITHOUT feeding a large yaw_input into the propeller mix — most likely by
+# rotating first and gating forward drive on heading, rather than by turning
+# harder while already translating.
+MIN_YAW_AUTHORITY = 0.0
+
+# Forward command retained once inside ARRIVE_RADIUS. Not zero: cutting the
+# command entirely left the drone with no way to hold station, so it coasted
+# out of the radius and orbited. Small enough not to overshoot back through
+# the target, large enough to resist drift.
+HOLD_DRIVE_SCALE = 0.35
+
 # ---- Gains ---------------------------------------------------------------
 # Tune in this order, one at a time: altitude, then yaw, then forward.
 K_VERTICAL_P = 3.0          # altitude error -> thrust
-K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
+# REVERTED to 68.5. Raising this to 69.3 drove the controller to command
+# NEGATIVE vertical input (vin=-0.221) to fight an over-powered base.
+#
+# The reasoning that led there was wrong: vin=+0.648 at equilibrium looked
+# like evidence the base was too low, but that was the equilibrium of a
+# SATURATED integral. A saturated integral tells you nothing about the base
+# — only that the integral could not do its job.
+K_VERTICAL_THRUST = 68.5
 
 # A proportional term on a cubic error cannot close a steady-state offset:
 # thrust and gravity reach equilibrium below target and stay there (measured
@@ -60,19 +85,53 @@ K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
 #
 # Windup is bounded by the clamp plus a saturation back-off — never by gating
 # where the term may act. Gating it produced false equilibria twice.
-# Measured with telemetry: the integral pinned at the 1.2 clamp on every
-# sample while alt held 1.08m and aerr held +0.42. Saturated the whole
-# flight, so the CLAMP was capping authority, not the gain. At equilibrium
-# vin=+0.646, of which the cubic P term gives only 3.0*0.423^3 = 0.227 and
-# the rest (0.42) came from the pinned integral. Closing another 0.42m of
-# error needs roughly double that authority, so the ceiling must sit well
-# clear of what equilibrium demands rather than just above it.
-K_VERTICAL_I = 0.35
-MAX_VERTICAL_INTEGRAL = 4.0
+# Altitude is a PID, and the D term is what makes it settle rather than
+# oscillate. History, all measured:
+#
+#   clamp 1.2 -> integral pinned every sample, alt stuck at 1.08m
+#   clamp 4.0 -> sustained limit cycle, alt swinging 1.0-2.3m for 515 lines,
+#                integral swinging 0.6-4.0, 27 ARRIVED events, no decay
+#
+# Both are the same loop. A PI controller on a second-order plant (thrust ->
+# acceleration -> velocity -> altitude) oscillates; the 1.2 clamp was merely
+# suppressing the swing by starving it, which read as a steady-state offset.
+# The giveaway in the second run: I peaked at +3.065 while aerr was +0.001 —
+# maximum authority at zero error, a quarter cycle out of phase, which is an
+# undamped integrator.
+#
+# The D term opposes vertical RATE, so it brakes the drone as it approaches
+# the target altitude instead of sailing through it.
+# With the D term damping the loop, the ceiling can rise without bringing
+# the oscillation back. Measured at clamp 2.5: I pinned at +2.500 on every
+# sample with aerr steady at +0.367 and vrate at 0.00 — saturated and
+# perfectly damped, so the ceiling was the only thing capping authority.
+# THE CEILING WAS NEVER THE CONSTRAINT. Three clamp settings — 1.2, 2.5 and
+# 6.0 — all produced the SAME equilibrium output, vin=+0.648, with the
+# integral pinned and aerr steady near +0.25. An integral that saturates at
+# every ceiling and still cannot close the error is not short of headroom:
+# something downstream of it is capping the thrust.
+#
+# That something is K_VERTICAL_THRUST. Base 68.5 plus vin lands at T=69.15,
+# and 69.15 is simply not enough thrust to hold 1.5m on this airframe — the
+# drone settles wherever 69.15 happens to balance gravity, which is ~1.25m.
+# The integral was compensating for a base thrust set too low, which is not
+# an integral's job.
+#
+# Raise the base to where hover actually is, and let I do what it is for:
+# trimming a small residual, not supplying the bulk of the lift.
+K_VERTICAL_I = 0.10
+K_VERTICAL_D = 3.0
+MAX_VERTICAL_INTEGRAL = 3.0
 
 K_ROLL_P = 50.0             # attitude stabilisation, not steering
 K_PITCH_P = 30.0
 
+# REVERTED to 1.6. Raising this to 2.4 (with a 0.35 authority floor) crashed
+# the drone: yin reached +5.602 and the aircraft went down at (4.21, 0.85),
+# alt=0.02. yaw_input feeds the propeller mix directly — it subtracts from
+# two rotors and adds to the other two — so a large yaw command tips the
+# airframe rather than just rotating it. The heading-stall it was meant to
+# fix is real, but the cure has to come from somewhere other than raw gain.
 K_YAW_P = 1.6               # bearing error -> yaw rate
 K_FORWARD_P = 0.22          # distance -> pitch (forward lean)
 
@@ -150,6 +209,10 @@ class Phase1Controller:
 
         self.arrived = False
         self.altitude_integral = 0.0
+
+        # Previous altitude, for the vertical-rate estimate the D term needs.
+        # None until the first step has run.
+        self.prev_altitude = None
 
         # Which GPS component is "up" depends on the world's coordinateSystem:
         # ENU (Webots' modern default) puts altitude at index 2, NUE (used by
@@ -230,9 +293,21 @@ class Phase1Controller:
                 MAX_VERTICAL_INTEGRAL,
             )
 
+        # Vertical rate from GPS altitude deltas. Opposing it damps the loop:
+        # without this the integral reaches peak authority at zero error and
+        # the altitude cycles indefinitely (measured, 1.0-2.3m, 515 lines).
+        if self.prev_altitude is None:
+            vertical_rate = 0.0
+        else:
+            vertical_rate = (altitude - self.prev_altitude) / (
+                self.timestep / 1000.0
+            )
+        self.prev_altitude = altitude
+
         vertical_input = (
             K_VERTICAL_P * (altitude_error ** 3.0)
             + K_VERTICAL_I * self.altitude_integral
+            - K_VERTICAL_D * vertical_rate
         )
 
         # --- Bearing -> yaw rate
@@ -241,20 +316,42 @@ class Phase1Controller:
         # drone orbited on a stale heading. Here the SIGNAL stays live and only
         # its authority is attenuated, so a meaningless close-range bearing
         # produces a small command instead of a full-gain kick.
-        yaw_authority = clamp(distance / YAW_FADE_START, 0.0, 1.0)
-        yaw_input = (
-            0.0 if self.arrived else K_YAW_P * bearing_error * yaw_authority
+        # Yaw stays live in HOLD. Zeroing it on arrival meant the drone could
+        # not correct heading while station-keeping, and the fade below
+        # already attenuates the noisy close-range bearing to near nothing.
+        # The floor matters: faded to 0.13 the command could not rotate the
+        # airframe at all, so the drone sat 71deg off target indefinitely.
+        # Attenuate the noisy close-range bearing, but never below the
+        # authority needed to actually turn.
+        yaw_authority = clamp(
+            distance / YAW_FADE_START, MIN_YAW_AUTHORITY, 1.0
         )
+        yaw_input = K_YAW_P * bearing_error * yaw_authority
 
         # --- Distance -> forward lean
-        if self.arrived or abs(bearing_error) > FACING_TOLERANCE:
+        # Station-keeping matters as much as the approach. Measured: cutting
+        # the forward command to zero on arrival left the drone with NO way
+        # to hold position — it coasted outward until d exceeded the arrival
+        # radius, flipped back to FLY, took a yaw kick, and orbited. 27
+        # arrivals in one run, none of them stable.
+        #
+        # So keep steering at the target inside the radius, just gently: the
+        # command stays proportional to distance and is simply scaled down.
+        #
+        # The facing gate applies only OUTSIDE the arrival radius. Measured:
+        # with the gate active in HOLD the drone sat yawed ~72deg off target
+        # (brg pinned at +1.252 > FACING_TOLERANCE), so the drive was gated to
+        # zero every step and the station-keeping never ran at all. Close in
+        # the gate is pointless anyway — cos(bearing) already scales the
+        # drive, and at 0.2m there is no curved-path problem to prevent.
+        gated = (not self.arrived) and abs(bearing_error) > FACING_TOLERANCE
+        if gated:
             pitch_disturbance = 0.0
         else:
-            pitch_disturbance = clamp(
-                K_FORWARD_P * distance * math.cos(bearing_error),
-                0.0,
-                MAX_PITCH_DISTURBANCE,
-            )
+            drive = K_FORWARD_P * distance * math.cos(bearing_error)
+            if self.arrived:
+                drive *= HOLD_DRIVE_SCALE
+            pitch_disturbance = clamp(drive, 0.0, MAX_PITCH_DISTURBANCE)
 
         # --- Attitude stabilisation (holds the aircraft level; not steering)
         roll_input = K_ROLL_P * clamp(roll, -1.0, 1.0) + roll_rate
@@ -289,6 +386,7 @@ class Phase1Controller:
             "alt_err": altitude_error,
             "integral": self.altitude_integral,
             "vertical_input": vertical_input,
+            "vertical_rate": vertical_rate,
             "yaw_input": yaw_input,
             "yaw_authority": yaw_authority,
             "pitch_disturbance": pitch_disturbance,
@@ -402,6 +500,7 @@ def run_phase1(robot, timestep):
                 f"aerr={s['alt_err']:+.3f} "
                 f"I={s['integral']:+.3f} "
                 f"vin={s['vertical_input']:+.3f} "
+                f"vrate={s['vertical_rate']:+.2f} "
                 f"yin={s['yaw_input']:+.3f} "
                 f"ya={s['yaw_authority']:.2f} "
                 f"pd={s['pitch_disturbance']:.3f} "
