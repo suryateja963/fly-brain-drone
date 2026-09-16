@@ -97,10 +97,14 @@ MAX_PITCH_DISTURBANCE = 0.6
 # sideways along a curved path instead of flying the bearing.
 FACING_TOLERANCE = 0.5  # radians
 
-# Below this distance the bearing to target is dominated by noise — it swung
-# through a full pi in the measured run while the drone sat 0.1m away. Hold
-# the last heading instead of chasing a meaningless angle.
-BEARING_DEADZONE = 0.5  # metres
+# Yaw authority fades linearly to zero as distance falls to zero, reaching
+# full gain at this range. Bearing is noise-dominated close in, so the
+# command is attenuated rather than the signal frozen — freezing it produced
+# a permanent orbit on a stale heading (see the note in step()).
+#
+# Must stay comfortably above RESUME_RADIUS: authority has to be near zero
+# by the time the drone is close enough to leave HOLD on drift alone.
+BEARING_FADE = 1.2  # metres
 
 # The Mavic worlds use basicTimeStep 8, so the control loop runs at 125Hz.
 # Printing every 16th step is 8 lines/second — faster than you can read.
@@ -168,10 +172,6 @@ class Phase1Controller:
         # Previous horizontal position, for the closing-speed estimate the
         # braking term needs. None until the first step has run.
         self.prev_position = None
-
-        # Last bearing taken outside BEARING_DEADZONE. Held while close in,
-        # where the true bearing is noise.
-        self.last_bearing_error = 0.0
 
         # Which GPS component is "up" depends on the world's coordinateSystem:
         # ENU (Webots' modern default) puts altitude at index 2, NUE (used by
@@ -249,13 +249,19 @@ class Phase1Controller:
         elif distance > RESUME_RADIUS:
             self.arrived = False
 
-        # Close to the target the bearing is noise: it swung through a full pi
-        # while the drone sat 0.1m away. Hold the last good heading instead.
-        if distance > BEARING_DEADZONE:
-            bearing_error = wrap_angle(math.atan2(dy, dx) - yaw)
-            self.last_bearing_error = bearing_error
-        else:
-            bearing_error = self.last_bearing_error
+        # Bearing is always computed fresh. An earlier version froze it inside
+        # a 0.5m deadzone and reused the last value, which produced a closed
+        # orbit: BEARING_DEADZONE (0.5m) was larger than RESUME_RADIUS (0.6m)
+        # minus the drift, so the drone left HOLD and began translating while
+        # still inside the deadzone — flying a STALE compass heading unrelated
+        # to where the target actually was. Measured: bearing_err pinned at
+        # -0.859 for ~40 samples while the drone traced the same loop forever.
+        #
+        # The real problem the deadzone was aimed at is that bearing is noisy
+        # at close range. That is handled below by scaling the yaw command
+        # down as distance shrinks, which bounds the bad signal's EFFECT
+        # rather than freezing the signal itself.
+        bearing_error = wrap_angle(math.atan2(dy, dx) - yaw)
 
         # --- Altitude -> thrust (PI, not P)
         altitude_error = clamp(TARGET_ALTITUDE - altitude, -1.0, 1.0)
@@ -298,7 +304,15 @@ class Phase1Controller:
         )
 
         # --- Bearing -> yaw rate
-        yaw_input = 0.0 if self.arrived else K_YAW_P * bearing_error
+        # Scale authority down as distance shrinks. At close range the bearing
+        # to target is dominated by noise — a 5cm position wobble 20cm out
+        # swings it through a radian — so acting on it at full gain makes the
+        # drone chase an angle that means nothing. Fading the gain bounds that
+        # signal's effect without freezing the signal (see the note above).
+        bearing_authority = clamp(distance / BEARING_FADE, 0.0, 1.0)
+        yaw_input = (
+            0.0 if self.arrived else K_YAW_P * bearing_error * bearing_authority
+        )
 
         # --- Distance -> forward lean, minus a braking term
         # Closing speed along the bearing, from GPS deltas. Braking against it
