@@ -83,6 +83,7 @@ class PipelineState:
         "payload_state",
         "override_reason",
         "target_altitude",
+        "true_position",
     )
 
     def __init__(self) -> None:
@@ -207,6 +208,7 @@ class FlyBrainPipeline:
         state = PipelineState()
         self._elapsed += dt
         p = np.asarray(position, dtype=np.float64)[:2]
+        state.true_position = p
 
         # --- Vision ----------------------------------------------------
         retina = retina_sample(
@@ -377,11 +379,32 @@ class FlyBrainPipeline:
             )
 
         # 7. The mission.
+        #
+        # Speed tapers to zero as the goal is approached, and station-keeps
+        # inside the arrival radius. MEASURED: without this the drone flew a
+        # clean track to within 0.5m of the target, then straight past it and
+        # down -- it had arrived and had no notion of stopping. Cutting speed
+        # to zero outright is equally wrong (a drone with no forward command
+        # drifts out of the radius and orbits back in), so the command decays
+        # smoothly and a small hold term remains.
         to_goal = self._goal_position - position
+        distance = float(np.linalg.norm(to_goal))
+        arrive_radius = self._cfg.flight.arrive_radius
+
+        if distance < arrive_radius:
+            speed_command = (
+                cruise * self._cfg.flight.hold_drive_scale * (distance / arrive_radius)
+            )
+        else:
+            # Taper over the final approach so it decelerates into the goal
+            # rather than arriving at full cruise.
+            taper = min(1.0, distance / (arrive_radius * 4.0))
+            speed_command = cruise * taper
+
         return (
             GoalCommand(
                 desired_heading=float(np.arctan2(to_goal[1], to_goal[0])),
-                desired_speed=cruise,
+                desired_speed=speed_command,
                 desired_altitude=state.target_altitude,
             ),
             None,
@@ -463,9 +486,14 @@ class FlyBrainPipeline:
             self._turning = True
 
         # --- Yaw authority fades close to the goal, where bearing is noise.
-        to_goal = float(
-            np.linalg.norm(self._goal_position - state.path_state.position_estimate)
-        )
+        # MEASURED: this previously used path_state.position_estimate, the
+        # DEAD-RECKONED position, while the goal bearing used true position.
+        # The estimate drifts, so the fade believed the drone was still far
+        # out and held full yaw authority right at the goal -- yaw spun
+        # 0.97 -> 1.44 -> 2.40 -> -2.75 rad on arrival. Both must measure
+        # against the same position, or the fade defends against a distance
+        # the bearing is not using.
+        to_goal = float(np.linalg.norm(self._goal_position - state.true_position))
         yaw_authority = float(np.clip(to_goal / flight.yaw_fade_start, 0.0, 1.0))
         yaw_input = flight.k_yaw_p * heading_error * yaw_authority
 
