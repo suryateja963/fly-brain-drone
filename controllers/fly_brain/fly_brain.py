@@ -34,10 +34,20 @@ TARGET_X = 5.0
 TARGET_Y = 3.0
 TARGET_ALTITUDE = 1.5
 
-# Stop translating inside this radius. No outer resume band: a single
-# threshold is simpler, and the orbiting it was meant to prevent turned out
-# to be caused by a frozen bearing, not by boundary hunting.
-ARRIVE_RADIUS = 0.35
+# Stop translating inside this radius.
+#
+# Measured: with this at 0.35 the drone settled into a permanent orbit at
+# d=0.33-0.35 — straddling the threshold, so `arrived` flickered, and every
+# flip to FLY fired yaw at full gain (yin=+-3.0) on a bearing that means
+# nothing at 0.34m, kicking it sideways into the next lap. The radius has to
+# sit outside the radius the drone actually holds, not on top of it.
+ARRIVE_RADIUS = 0.60
+
+# Yaw authority fades to zero as distance falls to this range, so a bearing
+# that is noise-dominated close in produces a small command rather than a
+# full-gain kick. This attenuates the signal's EFFECT; it never freezes the
+# signal itself, which is what caused an earlier orbit on a stale heading.
+YAW_FADE_START = 1.5  # metres
 
 # ---- Gains ---------------------------------------------------------------
 # Tune in this order, one at a time: altitude, then yaw, then forward.
@@ -50,8 +60,15 @@ K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
 #
 # Windup is bounded by the clamp plus a saturation back-off — never by gating
 # where the term may act. Gating it produced false equilibria twice.
+# Measured with telemetry: the integral pinned at the 1.2 clamp on every
+# sample while alt held 1.08m and aerr held +0.42. Saturated the whole
+# flight, so the CLAMP was capping authority, not the gain. At equilibrium
+# vin=+0.646, of which the cubic P term gives only 3.0*0.423^3 = 0.227 and
+# the rest (0.42) came from the pinned integral. Closing another 0.42m of
+# error needs roughly double that authority, so the ceiling must sit well
+# clear of what equilibrium demands rather than just above it.
 K_VERTICAL_I = 0.35
-MAX_VERTICAL_INTEGRAL = 1.2
+MAX_VERTICAL_INTEGRAL = 4.0
 
 K_ROLL_P = 50.0             # attitude stabilisation, not steering
 K_PITCH_P = 30.0
@@ -219,7 +236,15 @@ class Phase1Controller:
         )
 
         # --- Bearing -> yaw rate
-        yaw_input = 0.0 if self.arrived else K_YAW_P * bearing_error
+        # Fade authority as distance shrinks. Bearing is computed fresh every
+        # step and never frozen — an earlier version froze it close in and the
+        # drone orbited on a stale heading. Here the SIGNAL stays live and only
+        # its authority is attenuated, so a meaningless close-range bearing
+        # produces a small command instead of a full-gain kick.
+        yaw_authority = clamp(distance / YAW_FADE_START, 0.0, 1.0)
+        yaw_input = (
+            0.0 if self.arrived else K_YAW_P * bearing_error * yaw_authority
+        )
 
         # --- Distance -> forward lean
         if self.arrived or abs(bearing_error) > FACING_TOLERANCE:
@@ -265,6 +290,7 @@ class Phase1Controller:
             "integral": self.altitude_integral,
             "vertical_input": vertical_input,
             "yaw_input": yaw_input,
+            "yaw_authority": yaw_authority,
             "pitch_disturbance": pitch_disturbance,
             "thrust": base,
         }
@@ -346,7 +372,7 @@ def run_phase1(robot, timestep):
     print("[phase1] start position OK", flush=True)
     print(
         "[phase1] columns: pos alt dist bearing | "
-        "alt_err integral vert_in yaw_in pitch_dist thrust",
+        "alt_err integral vert_in yaw_in yaw_auth pitch_dist thrust",
         flush=True,
     )
 
@@ -377,6 +403,7 @@ def run_phase1(robot, timestep):
                 f"I={s['integral']:+.3f} "
                 f"vin={s['vertical_input']:+.3f} "
                 f"yin={s['yaw_input']:+.3f} "
+                f"ya={s['yaw_authority']:.2f} "
                 f"pd={s['pitch_disturbance']:.3f} "
                 f"T={s['thrust']:.2f}",
                 flush=True,
