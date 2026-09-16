@@ -1,0 +1,172 @@
+# Fly-Brain Drone — all tunable parameters.
+#
+# No magic numbers in source. Every gain, threshold and geometry lives here,
+# so tuning is a config change rather than a code change, and a demo can be
+# reproduced from a single file.
+#
+# Values marked UNTUNED have not been validated against the simulator. Values
+# marked MEASURED were derived from logged flight data; the comment says what
+# was measured.
+
+simulation:
+  timestep_ms: 8          # Webots basicTimeStep for the Mavic worlds
+  print_every: 125        # ~1 log line per second at 125Hz
+  control_rate_hz: 125
+
+retina:
+  rows: 20
+  cols: 40
+  blur_sigma: 1.0         # applied at FULL resolution, before the resize
+  camera_width: 400
+  camera_height: 240
+
+emd:
+  # Delay is an exponential moving average, not the raw previous frame: a
+  # single previous frame ties the delay length to the frame rate, while the
+  # EMA decouples them so tau can be tuned against real flight speeds.
+  tau: 0.6
+  # MEASURED: sign convention validated by 10 grating tests. Positive
+  # horizontal = rightward motion, positive vertical = downward.
+
+pooling:
+  # Fraction of the field width treated as "left" and "right" halves.
+  split_fraction: 0.5
+  # Rows excluded from lateral expansion: the top of the frame is usually sky
+  # and contributes noise rather than obstacle signal.
+  horizon_row_start: 4
+  # Gain converting measured yaw rate (rad/s) into the flow units the pooled
+  # rotation channel uses. Rotation must be subtracted BEFORE expansion is
+  # computed, or yaw in open space produces phantom obstacles.
+  yaw_rate_to_flow: 1.0
+
+avoidance:
+  turn_gain: 1.0          # UNTUNED — expansion difference to turn rate
+  brake_threshold: 1.0    # UNTUNED — total expansion above which speed is cut
+  brake_gain: 0.8
+  max_turn_rate: 1.5      # rad/s
+  # Sigmoid mapping total expansion to urgency in [0, 1].
+  urgency_midpoint: 1.0
+  urgency_steepness: 4.0
+
+ring_attractor:
+  n_units: 32
+  excitation_strength: 1.0
+  excitation_width: 2.0   # units, gaussian sigma of local excitation
+  inhibition_strength: 0.5
+  # Leak keeps the bump from saturating; too high and it fades, too low and
+  # it never sharpens.
+  leak: 0.1
+  # Shift per radian of yaw. n_units / (2*pi) maps a full turn to a full lap.
+  units_per_radian: 5.093  # 32 / (2*pi)
+  min_confidence: 0.3     # below this, heading estimate is not trusted
+
+path_integration:
+  # Dead reckoning drifts; this is accepted and biologically accurate. GPS,
+  # when available and trusted, corrects the estimate at this rate.
+  gps_correction_rate: 0.05
+  drift_per_metre: 0.01   # UNTUNED — expected accumulation
+
+arbitration:
+  # SIGMOID, never a hard switch. A hard switch produces a dodge-return
+  # limit cycle: the drone dodges, the obstacle leaves view, it turns back,
+  # the obstacle returns.
+  sigmoid_midpoint: 1.0
+  sigmoid_steepness: 4.0
+  min_goal_weight: 0.05   # the goal never fully vanishes
+
+flight:
+  target_altitude: 1.5
+  arrive_radius: 0.6
+  # MEASURED: base thrust for the Mavic 2 Pro. 68.5 hovers; raising it to
+  # 69.3 made the controller command negative vertical input.
+  base_thrust: 68.5
+  k_vertical_p: 3.0
+  k_vertical_i: 0.10
+  k_vertical_d: 3.0
+  max_vertical_integral: 3.0
+  k_roll_p: 50.0
+  k_pitch_p: 30.0
+  k_yaw_p: 1.6            # MEASURED: 2.4 crashed the drone — yaw feeds the
+                          # rotor mix directly and tips the airframe
+  k_forward_p: 0.22
+  max_pitch_disturbance: 0.6
+  yaw_fade_start: 1.5
+  hold_drive_scale: 0.35
+  turn_enter: 0.35        # rad — above this misalignment, stop and turn
+  turn_exit: 0.12         # rad — below this, resume cruising
+
+geofence:
+  # Polygons are lists of [x, y] vertices in world coordinates. The drone
+  # refuses to enter and steers back out.
+  enabled: true
+  margin: 2.0             # metres of standoff from any boundary
+  zones:
+    - name: "airport_approach"
+      polygon: [[20.0, 20.0], [40.0, 20.0], [40.0, 40.0], [20.0, 40.0]]
+    - name: "stadium"
+      polygon: [[-30.0, 10.0], [-15.0, 10.0], [-15.0, 25.0], [-30.0, 25.0]]
+
+altitude_cap:
+  # SAFETY-CRITICAL: enforced in the output bottleneck, not the planner, so
+  # no planning change can bypass it.
+  enabled: true
+  ceiling_m: 10.0
+  # Soft limit where the controller starts resisting, below the hard cap.
+  soft_limit_m: 8.0
+
+height_zones:
+  # Per-region altitude targets along a route.
+  - name: "low_corridor"
+    polygon: [[0.0, -10.0], [20.0, -10.0], [20.0, 0.0], [0.0, 0.0]]
+    target_altitude: 1.0
+    max_altitude: 2.0
+
+wind:
+  # Estimated from the gap between commanded and achieved motion.
+  estimation_window: 25   # samples
+  gust_threshold: 2.0     # m/s change within the window
+  recovery_timeout_s: 3.0
+
+battery:
+  capacity_wh: 60.0
+  nominal_voltage: 15.2
+  # Power draw model: idle plus a term proportional to commanded thrust.
+  idle_watts: 15.0
+  thrust_watt_per_unit: 0.9
+  # Return-to-home is computed against LIVE distance, not a fixed percentage:
+  # 20% is plenty at 10m and fatal at 500m.
+  reserve_fraction: 0.15
+  emergency_pct: 10.0
+  cruise_speed_ms: 3.0
+
+motor_failure:
+  # A quad with one dead rotor cannot hold yaw, but can hold position by
+  # spinning and rebalancing the remaining three.
+  detection_threshold: 0.3   # commanded vs achieved rotor speed ratio
+  rebalance_gain: 1.4
+  controlled_descent_rate: 0.5
+
+vibration:
+  # A cracked propeller shows as a spectral peak near rotor frequency.
+  sample_window: 128
+  anomaly_amplitude: 0.35    # UNTUNED
+  rotor_freq_hz: 95.0
+  freq_tolerance_hz: 12.0
+  reduced_speed_scale: 0.5
+
+payload:
+  # Release is refused while the zone is occupied, and detachment is
+  # confirmed so a snagged payload cannot cause a flyaway.
+  drop_zone_radius: 2.0
+  confirm_timeout_s: 1.5
+  min_release_altitude: 1.0
+
+telemetry:
+  report_on_landing: true
+  incident_log_size: 64
+
+demo:
+  panels: ["chase", "agent_eye", "flow_field", "channels", "ring"]
+  upscale_factor: 8
+  video_fps: 30
+  output_dir: "recordings"
