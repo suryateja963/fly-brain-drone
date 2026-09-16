@@ -60,13 +60,24 @@ K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
 # then sagged back through target and kept falling — the integral wound up
 # during the climb, and had to unwind again. The clamp also let it accumulate
 # far more than equilibrium needs.
-K_VERTICAL_I = 0.15
-MAX_VERTICAL_INTEGRAL = 1.0
+# UNTUNED — third iteration, still a guess. Flown history, all at 1.5m
+# commanded:
+#   P-only                      -> settled 0.90m (no integral authority)
+#   I=0.45, integrate always    -> peaked 2.29m, sagged (windup)
+#   I=0.15, integrate in band   -> settled 0.90m (band deadlocked the term)
+# Now: integrate always, bleed while far, back off when saturated.
+K_VERTICAL_I = 0.35
+MAX_VERTICAL_INTEGRAL = 1.2
 
-# Only integrate once the altitude error is inside this band. Outside it the
-# proportional term does the climbing; integrating through a large error just
-# winds the integral up and guarantees an overshoot.
+# Outside this error band the integral is bled toward zero each step, so the
+# climb does not bank authority it must unwind at the top. Inside it, the
+# term accumulates normally and trims the steady-state offset.
 INTEGRAL_BAND = 0.4  # metres
+
+# Per-step multiplier applied to the integral while outside INTEGRAL_BAND.
+# At 125Hz, 0.995 halves the accumulated integral in roughly 1.1 seconds —
+# fast enough to shed climb windup, slow enough not to fight the trim.
+INTEGRAL_DECAY = 0.995
 
 K_ROLL_P = 50.0             # attitude stabilisation, not steering
 K_PITCH_P = 30.0
@@ -251,17 +262,33 @@ class Phase1Controller:
         # --- Altitude -> thrust (PI, not P)
         altitude_error = clamp(TARGET_ALTITUDE - altitude, -1.0, 1.0)
 
-        # Conditional integration. Only accumulate once inside the trim band:
-        # the integral exists to close a small residual offset, not to drive
-        # the climb. Integrating through a 1.4m error winds up on the way up,
-        # overshoots (measured: 2.29m against a 1.5m command), then has to
-        # unwind — which is what produced the sag back through target.
-        if abs(altitude_error) < INTEGRAL_BAND:
+        # Always integrate; bound the integral instead of gating where it may
+        # act. An earlier version only accumulated inside a 0.4m band, which
+        # deadlocked: the airframe's natural equilibrium sits ~0.6m BELOW
+        # target, outside the band, so the integral could never accumulate the
+        # authority to climb into the band, and the drone settled at exactly
+        # the P-only equilibrium (0.90m measured, twice).
+        #
+        # Windup is prevented by the clamp plus back-off: when the output is
+        # already saturated in the direction the error points, stop adding to
+        # it. That bounds overshoot without ever locking the term out.
+        integral_step = altitude_error * (self.timestep / 1000.0)
+        saturated_high = self.altitude_integral >= MAX_VERTICAL_INTEGRAL
+        saturated_low = self.altitude_integral <= -MAX_VERTICAL_INTEGRAL
+        if not (saturated_high and integral_step > 0) and not (
+            saturated_low and integral_step < 0
+        ):
             self.altitude_integral = clamp(
-                self.altitude_integral + altitude_error * (self.timestep / 1000.0),
+                self.altitude_integral + integral_step,
                 -MAX_VERTICAL_INTEGRAL,
                 MAX_VERTICAL_INTEGRAL,
             )
+
+        # Bleed the integral toward zero while far from target, so the climb
+        # itself does not bank authority it will have to unwind at the top.
+        # This is what the band was reaching for, without the deadlock.
+        if abs(altitude_error) > INTEGRAL_BAND:
+            self.altitude_integral *= INTEGRAL_DECAY
         vertical_input = (
             K_VERTICAL_P * (altitude_error ** 3.0)
             + K_VERTICAL_I * self.altitude_integral

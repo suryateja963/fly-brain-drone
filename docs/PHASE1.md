@@ -48,6 +48,15 @@ If it happens: `git checkout worlds/01_empty.wbt` restores a clean start.
 
 To reset between runs use **revert** (`Ctrl+Shift+R`), never save.
 
+This has now happened twice. The usual cause is `Ctrl+S` out of habit, or
+answering "Save" to the prompt Webots shows when you close a world or quit.
+**Answer "Discard".** Nothing in the world is worth keeping between runs —
+every change you want lives in the `.wbt` in git.
+
+A run that begins with `ARRIVED after 1 steps`, or whose first printed
+position is already near the target, is a clobbered world, not a result.
+Restore it and re-run before reading anything into the numbers.
+
 ## Tuning order
 
 One gain at a time, in this order. Changing two at once makes it impossible
