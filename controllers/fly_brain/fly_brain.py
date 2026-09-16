@@ -69,15 +69,13 @@ K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
 K_VERTICAL_I = 0.35
 MAX_VERTICAL_INTEGRAL = 1.2
 
-# Outside this error band the integral is bled toward zero each step, so the
-# climb does not bank authority it must unwind at the top. Inside it, the
-# term accumulates normally and trims the steady-state offset.
-INTEGRAL_BAND = 0.4  # metres
-
-# Per-step multiplier applied to the integral while outside INTEGRAL_BAND.
-# At 125Hz, 0.995 halves the accumulated integral in roughly 1.1 seconds —
-# fast enough to shed climb windup, slow enough not to fight the trim.
-INTEGRAL_DECAY = 0.995
+# NOTE: INTEGRAL_BAND and INTEGRAL_DECAY are both gone. Each was an attempt
+# to suppress windup by restricting the integral, and each created a false
+# equilibrium where the restriction balanced the error term:
+#   band gate (0.4m) -> drone pinned at 0.90m, integral never engaged
+#   decay    (0.995) -> drone pinned at 1.00m, integral bled every step
+# Windup is now handled solely by the saturation back-off in step(), which
+# bounds the term without inventing an equilibrium of its own.
 
 K_ROLL_P = 50.0             # attitude stabilisation, not steering
 K_PITCH_P = 30.0
@@ -284,11 +282,16 @@ class Phase1Controller:
                 MAX_VERTICAL_INTEGRAL,
             )
 
-        # Bleed the integral toward zero while far from target, so the climb
-        # itself does not bank authority it will have to unwind at the top.
-        # This is what the band was reaching for, without the deadlock.
-        if abs(altitude_error) > INTEGRAL_BAND:
-            self.altitude_integral *= INTEGRAL_DECAY
+        # NO DECAY TERM HERE — deliberately. An earlier version bled the
+        # integral toward zero whenever the error exceeded INTEGRAL_BAND, and
+        # that created a second deadlock one layer up from the band gate it
+        # replaced: the drone pinned at exactly 1.00m, where the error (0.50m)
+        # sits just outside the 0.4m band, so the integral was bled every step
+        # and balanced the error term at a false equilibrium. Eleven
+        # consecutive samples read 1.00m.
+        #
+        # The saturation back-off above is sufficient for windup on its own,
+        # and unlike a decay it cannot manufacture an equilibrium of its own.
         vertical_input = (
             K_VERTICAL_P * (altitude_error ** 3.0)
             + K_VERTICAL_I * self.altitude_integral
