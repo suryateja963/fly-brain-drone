@@ -122,6 +122,7 @@ class FlyBrainPipeline:
         "_altitude_integral",
         "_previous_altitude",
         "_turning",
+        "_arrival_heading",
     )
 
     def __init__(self, cfg, goal_position: np.ndarray = None) -> None:
@@ -160,6 +161,7 @@ class FlyBrainPipeline:
         self._altitude_integral = 0.0
         self._previous_altitude = None
         self._turning = True
+        self._arrival_heading = None
 
     # -----------------------------------------------------------------
     # The step
@@ -391,6 +393,22 @@ class FlyBrainPipeline:
         distance = float(np.linalg.norm(to_goal))
         arrive_radius = self._cfg.flight.arrive_radius
 
+        # At the goal the bearing is undefined: a 5cm wobble swings it
+        # through a radian. MEASURED: without a held heading the drone
+        # rotated steadily on station, -0.60 -> +2.03 rad, chasing an angle
+        # that meant nothing. Latch the heading on first arrival and keep it
+        # until the drone genuinely leaves.
+        if distance < arrive_radius:
+            if self._arrival_heading is None:
+                self._arrival_heading = float(
+                    np.arctan2(to_goal[1], to_goal[0])
+                )
+            heading_command = self._arrival_heading
+        else:
+            if distance > arrive_radius * 1.5:
+                self._arrival_heading = None
+            heading_command = float(np.arctan2(to_goal[1], to_goal[0]))
+
         if distance < arrive_radius:
             speed_command = (
                 cruise * self._cfg.flight.hold_drive_scale * (distance / arrive_radius)
@@ -403,7 +421,7 @@ class FlyBrainPipeline:
 
         return (
             GoalCommand(
-                desired_heading=float(np.arctan2(to_goal[1], to_goal[0])),
+                desired_heading=heading_command,
                 desired_speed=speed_command,
                 desired_altitude=state.target_altitude,
             ),
