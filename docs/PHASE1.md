@@ -48,6 +48,26 @@ If it happens: `git checkout worlds/01_empty.wbt` restores a clean start.
 
 To reset between runs use **revert** (`Ctrl+Shift+R`), never save.
 
+### Two guards now make this hard to get wrong
+
+**The world file is read-only.** Webots cannot overwrite it — a save raises
+an error instead of silently resetting the drone's start position. When you
+genuinely need to edit the world:
+
+```sh
+attrib -r "worlds\01_empty.wbt"     # edit, then re-protect:
+attrib +r "worlds\01_empty.wbt"
+```
+
+**The controller refuses to fly from the wrong place.** It checks its start
+position before takeoff and, if it is more than 1 m from the origin, prints
+the fix and stops rather than producing another misleading log:
+
+```
+[phase1] REFUSING TO FLY: start position is (+5.23, +3.34), 6.03m from
+         the expected origin
+```
+
 This has now happened twice. The usual cause is `Ctrl+S` out of habit, or
 answering "Save" to the prompt Webots shows when you close a world or quit.
 **Answer "Discard".** Nothing in the world is worth keeping between runs —
@@ -73,9 +93,31 @@ to attribute what happened.
 3. **`K_YAW_P`** — restore the real target. It should turn to face the
    target and stop. Overshooting past the bearing and swinging back means
    too high.
-4. **`K_FORWARD_P`** and **`K_BRAKE`** — last, as a pair. Overshooting the
-   waypoint means `K_FORWARD_P` too high or `K_BRAKE` too low; crawling to a
-   stop short of it means the reverse.
+4. **`K_FORWARD_P`** — last. Too high overshoots the waypoint; too low
+   crawls or stalls short of it.
+
+### What was removed, and why
+
+An earlier version added an arrival hysteresis band, a closing-speed brake,
+and a distance-scaled bearing fade. All three are gone.
+
+Two of them caused bugs worse than what they fixed. The pattern was the same
+each time: **suppressing a signal rather than bounding its effect**, and each
+suppression created a *stable wrong state*, which is harder to spot than
+noise because it looks deliberate.
+
+| Mechanism | Failure it produced |
+|---|---|
+| Integral band gate | Pinned at 0.90 m — term locked out of its own region |
+| Integral decay | Pinned at 1.00 m — decay balanced the error term |
+| Bearing deadzone | Permanent orbit on a frozen heading |
+
+The diagnostic tell in every case: a value sitting **dead flat at a round
+number**, rather than drifting. Real equilibria drift; manufactured ones do
+not.
+
+Add any of these back only when a measured failure demands it, one at a
+time, and only after the telemetry columns show which term is at fault.
 
 ### Why altitude needs an integral
 

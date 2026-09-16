@@ -11,8 +11,14 @@ need to already know the flight stack is sound, so the fault can only be in
 the fly brain. Keep this controller working — it is also the manual-flight
 rig you fly while validating the EMD layer in Phase 2.
 
-PHASE 2 (next): replace the ground-truth bearing with optic flow. The flight
-control below does not change.
+DELIBERATELY MINIMAL. An earlier version layered on an arrival hysteresis
+band, a closing-speed brake, and a distance-scaled bearing fade. Two of the
+three introduced bugs worse than what they fixed — each suppressed a signal
+rather than bounding its effect, and each suppression created a stable wrong
+state (a false altitude equilibrium, a permanent orbit). They are gone.
+
+Add complexity back only when a measured failure demands it, one term at a
+time, and only after the telemetry below shows which term is at fault.
 
 Set PHASE = 0 to fall back to the toolchain sensor check.
 """
@@ -28,66 +34,30 @@ TARGET_X = 5.0
 TARGET_Y = 3.0
 TARGET_ALTITUDE = 1.5
 
-# Within this radius we count as arrived and stop translating. The outer band
-# is hysteresis: once arrived, we only resume flying if we drift past it.
-# Without the gap the drone hunts across the boundary forever.
+# Stop translating inside this radius. No outer resume band: a single
+# threshold is simpler, and the orbiting it was meant to prevent turned out
+# to be caused by a frozen bearing, not by boundary hunting.
 ARRIVE_RADIUS = 0.35
-RESUME_RADIUS = 0.60
 
 # ---- Gains ---------------------------------------------------------------
-# Tune these in order: altitude first (in a hover, target = start position),
-# then yaw (it should turn to face the target without overshooting), then
-# pitch last. Change one at a time.
+# Tune in this order, one at a time: altitude, then yaw, then forward.
 K_VERTICAL_P = 3.0          # altitude error -> thrust
 K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
 
-# A pure proportional term on a cubic error cannot close a steady-state
-# offset: thrust and gravity reach equilibrium below target and stay there
-# (measured: commanded 1.5m, settled flat at 0.90m). The integral term
-# accumulates the residual error and trims it out.
-# UNTUNED. The integral term is structurally right — a P-only loop on a cubic
-# error cannot close a steady-state offset, which is why the measured run sat
-# flat at 0.90m against a 1.5m command — but this gain is a starting guess,
-# not a tuned value. It must be tuned against the real airframe:
+# A proportional term on a cubic error cannot close a steady-state offset:
+# thrust and gravity reach equilibrium below target and stay there (measured
+# at 0.90m against a 1.5m command). The integral trims that residual.
 #
-#   too low  -> settles short of TARGET_ALTITUDE (the bug this replaces)
-#   too high -> overshoots, then oscillates slowly about the target
-#
-# The clamp must stay well clear of the integral the loop needs at
-# equilibrium, or it becomes the binding constraint and the drone settles
-# short with the integral pinned at the clamp.
-# Measured: 0.45 with a 3.0 clamp overshot to 2.29m against a 1.5m command,
-# then sagged back through target and kept falling — the integral wound up
-# during the climb, and had to unwind again. The clamp also let it accumulate
-# far more than equilibrium needs.
-# UNTUNED — third iteration, still a guess. Flown history, all at 1.5m
-# commanded:
-#   P-only                      -> settled 0.90m (no integral authority)
-#   I=0.45, integrate always    -> peaked 2.29m, sagged (windup)
-#   I=0.15, integrate in band   -> settled 0.90m (band deadlocked the term)
-# Now: integrate always, bleed while far, back off when saturated.
+# Windup is bounded by the clamp plus a saturation back-off — never by gating
+# where the term may act. Gating it produced false equilibria twice.
 K_VERTICAL_I = 0.35
 MAX_VERTICAL_INTEGRAL = 1.2
-
-# NOTE: INTEGRAL_BAND and INTEGRAL_DECAY are both gone. Each was an attempt
-# to suppress windup by restricting the integral, and each created a false
-# equilibrium where the restriction balanced the error term:
-#   band gate (0.4m) -> drone pinned at 0.90m, integral never engaged
-#   decay    (0.995) -> drone pinned at 1.00m, integral bled every step
-# Windup is now handled solely by the saturation back-off in step(), which
-# bounds the term without inventing an equilibrium of its own.
 
 K_ROLL_P = 50.0             # attitude stabilisation, not steering
 K_PITCH_P = 30.0
 
 K_YAW_P = 1.6               # bearing error -> yaw rate
 K_FORWARD_P = 0.22          # distance -> pitch (forward lean)
-
-# Braking. Without this the drone carries its momentum past the target when
-# pitch_disturbance drops to zero, overshoots, turns round, and orbits
-# forever. Opposing lean proportional to closing speed stops it on the mark.
-K_BRAKE = 0.9
-MAX_BRAKE = 0.5
 
 # Lean angle is what actually limits speed. Too much and the camera points at
 # the floor, which matters from Phase 2 onward.
@@ -97,19 +67,17 @@ MAX_PITCH_DISTURBANCE = 0.6
 # sideways along a curved path instead of flying the bearing.
 FACING_TOLERANCE = 0.5  # radians
 
-# Yaw authority fades linearly to zero as distance falls to zero, reaching
-# full gain at this range. Bearing is noise-dominated close in, so the
-# command is attenuated rather than the signal frozen — freezing it produced
-# a permanent orbit on a stale heading (see the note in step()).
-#
-# Must stay comfortably above RESUME_RADIUS: authority has to be near zero
-# by the time the drone is close enough to leave HOLD on drift alone.
-BEARING_FADE = 1.2  # metres
-
-# The Mavic worlds use basicTimeStep 8, so the control loop runs at 125Hz.
-# Printing every 16th step is 8 lines/second — faster than you can read.
-# 125 gives roughly one line per second.
+# The Mavic worlds use basicTimeStep 8, so the loop runs at 125Hz.
 PRINT_EVERY = 125
+
+# ---- Startup guard -------------------------------------------------------
+# Webots writes the drone's CURRENT position into the .wbt when the world is
+# saved, so saving mid-flight makes the next run start wherever the drone
+# happened to be. That has happened four times, and each time the run tested
+# nothing while looking superficially normal. Refuse to fly rather than
+# produce another misleading log.
+EXPECTED_START = (0.0, 0.0)
+START_TOLERANCE = 1.0  # metres
 
 
 def wrap_angle(radians):
@@ -164,68 +132,51 @@ class Phase1Controller:
             self.motors.append(motor)
 
         self.arrived = False
-
-        # Altitude PI state. The integral trims the steady-state offset a
-        # proportional term alone leaves (see K_VERTICAL_I).
         self.altitude_integral = 0.0
-
-        # Previous horizontal position, for the closing-speed estimate the
-        # braking term needs. None until the first step has run.
-        self.prev_position = None
 
         # Which GPS component is "up" depends on the world's coordinateSystem:
         # ENU (Webots' modern default) puts altitude at index 2, NUE (used by
-        # several bundled sample worlds) at index 1. Guessing wrong makes the
-        # altitude loop track a horizontal coordinate, and the drone never
-        # takes off. Detect it instead — see _detect_up_axis.
+        # several bundled sample worlds) at index 1. Detected on first step.
         self.up_axis = None
         self.horizontal_axes = None
 
     def _detect_up_axis(self):
         """Pick the GPS component that is vertical, by elimination.
 
-        Called once, on the first control step, while the drone is still on
-        the ground. The two horizontal components are the drone's start
-        position (near the world origin in the sample worlds); the vertical
-        one carries its resting altitude above the ground plane.
-
-        We cannot simply take the largest — a drone parked away from the
-        origin would defeat that. Instead we use the fact that Webots only
-        ever uses ENU or NUE, so the up-axis is index 2 or index 1, and the
-        remaining axis pairs with x. Compare the two candidates against the
-        IMU: on the ground, level, the vertical component is the one that
-        does not change as the drone is translated. With a single sample we
-        fall back on magnitude between only those two candidates, which is
-        reliable because resting altitude is positive and small while a
-        horizontal start coordinate is typically ~0.
+        Webots only ever uses ENU or NUE, so the up-axis is index 2 or 1.
+        On the ground the vertical component holds a small positive resting
+        altitude, while a horizontal start coordinate is near zero.
         """
         values = self.gps.getValues()
         enu_alt = values[2]
         nue_alt = values[1]
 
-        # Resting altitude is positive (above the ground plane). A horizontal
-        # start coordinate is near zero in the sample worlds, and may be
-        # negative — which a horizontal axis can be and an altitude cannot.
         if nue_alt > 0.01 and enu_alt <= 0.01:
             self.up_axis, self.horizontal_axes = 1, (0, 2)
         elif enu_alt > 0.01 and nue_alt <= 0.01:
             self.up_axis, self.horizontal_axes = 2, (0, 1)
         else:
-            # Both or neither look plausible: prefer ENU, Webots' default for
-            # worlds saved by R2022 and later.
             self.up_axis, self.horizontal_axes = 2, (0, 1)
 
         system = "ENU (z up)" if self.up_axis == 2 else "NUE (y up)"
         print(
-            f"[phase1] coordinate system detected: {system} "
+            f"[phase1] coordinate system: {system} "
             f"gps={tuple(round(v, 3) for v in values)}",
             flush=True,
         )
-        print(
-            "[phase1] if the drone does not climb, this detection is wrong — "
-            "check the world's coordinateSystem field and set UP_AXIS manually",
-            flush=True,
-        )
+
+    def check_start_position(self):
+        """Return an error string if the world was saved mid-flight."""
+        gps = self.gps.getValues()
+        x = gps[self.horizontal_axes[0]]
+        y = gps[self.horizontal_axes[1]]
+        drift = math.hypot(x - EXPECTED_START[0], y - EXPECTED_START[1])
+        if drift > START_TOLERANCE:
+            return (
+                f"start position is ({x:+.2f}, {y:+.2f}), "
+                f"{drift:.2f}m from the expected origin"
+            )
+        return None
 
     def step(self):
         """One control cycle. Returns a status dict for logging."""
@@ -242,107 +193,49 @@ class Phase1Controller:
         dx = TARGET_X - x
         dy = TARGET_Y - y
         distance = math.hypot(dx, dy)
+        self.arrived = distance < ARRIVE_RADIUS
 
-        # Hysteresis band — see ARRIVE_RADIUS.
-        if distance < ARRIVE_RADIUS:
-            self.arrived = True
-        elif distance > RESUME_RADIUS:
-            self.arrived = False
-
-        # Bearing is always computed fresh. An earlier version froze it inside
-        # a 0.5m deadzone and reused the last value, which produced a closed
-        # orbit: BEARING_DEADZONE (0.5m) was larger than RESUME_RADIUS (0.6m)
-        # minus the drift, so the drone left HOLD and began translating while
-        # still inside the deadzone — flying a STALE compass heading unrelated
-        # to where the target actually was. Measured: bearing_err pinned at
-        # -0.859 for ~40 samples while the drone traced the same loop forever.
-        #
-        # The real problem the deadzone was aimed at is that bearing is noisy
-        # at close range. That is handled below by scaling the yaw command
-        # down as distance shrinks, which bounds the bad signal's EFFECT
-        # rather than freezing the signal itself.
         bearing_error = wrap_angle(math.atan2(dy, dx) - yaw)
 
-        # --- Altitude -> thrust (PI, not P)
+        # --- Altitude -> thrust (PI)
         altitude_error = clamp(TARGET_ALTITUDE - altitude, -1.0, 1.0)
 
-        # Always integrate; bound the integral instead of gating where it may
-        # act. An earlier version only accumulated inside a 0.4m band, which
-        # deadlocked: the airframe's natural equilibrium sits ~0.6m BELOW
-        # target, outside the band, so the integral could never accumulate the
-        # authority to climb into the band, and the drone settled at exactly
-        # the P-only equilibrium (0.90m measured, twice).
-        #
-        # Windup is prevented by the clamp plus back-off: when the output is
-        # already saturated in the direction the error points, stop adding to
-        # it. That bounds overshoot without ever locking the term out.
+        # Integrate always; bound the term, never gate where it may act.
+        # Back off only when already saturated in the error's direction —
+        # unlike a gate or a decay, that cannot invent an equilibrium.
         integral_step = altitude_error * (self.timestep / 1000.0)
-        saturated_high = self.altitude_integral >= MAX_VERTICAL_INTEGRAL
-        saturated_low = self.altitude_integral <= -MAX_VERTICAL_INTEGRAL
-        if not (saturated_high and integral_step > 0) and not (
-            saturated_low and integral_step < 0
-        ):
+        at_high = self.altitude_integral >= MAX_VERTICAL_INTEGRAL
+        at_low = self.altitude_integral <= -MAX_VERTICAL_INTEGRAL
+        if not (at_high and integral_step > 0) and not (at_low and integral_step < 0):
             self.altitude_integral = clamp(
                 self.altitude_integral + integral_step,
                 -MAX_VERTICAL_INTEGRAL,
                 MAX_VERTICAL_INTEGRAL,
             )
 
-        # NO DECAY TERM HERE — deliberately. An earlier version bled the
-        # integral toward zero whenever the error exceeded INTEGRAL_BAND, and
-        # that created a second deadlock one layer up from the band gate it
-        # replaced: the drone pinned at exactly 1.00m, where the error (0.50m)
-        # sits just outside the 0.4m band, so the integral was bled every step
-        # and balanced the error term at a false equilibrium. Eleven
-        # consecutive samples read 1.00m.
-        #
-        # The saturation back-off above is sufficient for windup on its own,
-        # and unlike a decay it cannot manufacture an equilibrium of its own.
         vertical_input = (
             K_VERTICAL_P * (altitude_error ** 3.0)
             + K_VERTICAL_I * self.altitude_integral
         )
 
         # --- Bearing -> yaw rate
-        # Scale authority down as distance shrinks. At close range the bearing
-        # to target is dominated by noise — a 5cm position wobble 20cm out
-        # swings it through a radian — so acting on it at full gain makes the
-        # drone chase an angle that means nothing. Fading the gain bounds that
-        # signal's effect without freezing the signal (see the note above).
-        bearing_authority = clamp(distance / BEARING_FADE, 0.0, 1.0)
-        yaw_input = (
-            0.0 if self.arrived else K_YAW_P * bearing_error * bearing_authority
-        )
+        yaw_input = 0.0 if self.arrived else K_YAW_P * bearing_error
 
-        # --- Distance -> forward lean, minus a braking term
-        # Closing speed along the bearing, from GPS deltas. Braking against it
-        # is what stops the drone on the mark instead of orbiting the target.
-        dt = self.timestep / 1000.0
-        if self.prev_position is None:
-            closing_speed = 0.0
-        else:
-            moved_x = x - self.prev_position[0]
-            moved_y = y - self.prev_position[1]
-            # Project movement onto the unit vector pointing at the target.
-            if distance > 1e-6:
-                closing_speed = (moved_x * dx + moved_y * dy) / (distance * dt)
-            else:
-                closing_speed = 0.0
-        self.prev_position = (x, y)
-
+        # --- Distance -> forward lean
         if self.arrived or abs(bearing_error) > FACING_TOLERANCE:
             pitch_disturbance = 0.0
         else:
-            facing = math.cos(bearing_error)
-            drive = K_FORWARD_P * distance * facing
-            brake = clamp(K_BRAKE * closing_speed, 0.0, MAX_BRAKE)
             pitch_disturbance = clamp(
-                drive - brake, 0.0, MAX_PITCH_DISTURBANCE
+                K_FORWARD_P * distance * math.cos(bearing_error),
+                0.0,
+                MAX_PITCH_DISTURBANCE,
             )
 
         # --- Attitude stabilisation (holds the aircraft level; not steering)
         roll_input = K_ROLL_P * clamp(roll, -1.0, 1.0) + roll_rate
-        pitch_input = K_PITCH_P * clamp(pitch, -1.0, 1.0) + pitch_rate - pitch_disturbance
+        pitch_input = (
+            K_PITCH_P * clamp(pitch, -1.0, 1.0) + pitch_rate - pitch_disturbance
+        )
 
         # --- Mix to four propellers
         base = K_VERTICAL_THRUST + vertical_input
@@ -360,10 +253,20 @@ class Phase1Controller:
             "x": x,
             "y": y,
             "altitude": altitude,
+            "roll": roll,
+            "pitch": pitch,
             "yaw": yaw,
             "distance": distance,
             "bearing_error": bearing_error,
             "arrived": self.arrived,
+            # Internal terms, so the next failure is diagnosable without
+            # guessing which one is at fault.
+            "alt_err": altitude_error,
+            "integral": self.altitude_integral,
+            "vertical_input": vertical_input,
+            "yaw_input": yaw_input,
+            "pitch_disturbance": pitch_disturbance,
+            "thrust": base,
         }
 
 
@@ -376,8 +279,6 @@ def run_phase0(robot, timestep):
     gyro = robot.getDevice("gyro")
     gyro.enable(timestep)
 
-    # Not needed for the Phase 0 exit test, but printing the raw GPS triple
-    # here is how you confirm the up-axis before Phase 1 depends on it.
     gps = robot.getDevice("gps")
     if gps is not None:
         gps.enable(timestep)
@@ -419,29 +320,65 @@ def run_phase1(robot, timestep):
         flush=True,
     )
 
+    # One step to populate the sensors before reading the start position.
+    if robot.step(timestep) == -1:
+        return
+    controller.step()
+
+    problem = controller.check_start_position()
+    if problem is not None:
+        print("", flush=True)
+        print("=" * 68, flush=True)
+        print(f"[phase1] REFUSING TO FLY: {problem}.", flush=True)
+        print("", flush=True)
+        print("The world was saved while the simulation was running, which", flush=True)
+        print("wrote the drone's then-current position into 01_empty.wbt.", flush=True)
+        print("A run from here tests nothing.", flush=True)
+        print("", flush=True)
+        print("  Fix:  git checkout worlds/01_empty.wbt", flush=True)
+        print("  Then: revert the world in Webots (Ctrl+Shift+R)", flush=True)
+        print("", flush=True)
+        print("When Webots asks to save on close, answer DISCARD.", flush=True)
+        print("=" * 68, flush=True)
+        print("", flush=True)
+        return
+
+    print("[phase1] start position OK", flush=True)
+    print(
+        "[phase1] columns: pos alt dist bearing | "
+        "alt_err integral vert_in yaw_in pitch_dist thrust",
+        flush=True,
+    )
+
     frames = 0
     announced = False
     while robot.step(timestep) != -1:
         frames += 1
-        status = controller.step()
+        s = controller.step()
 
-        if status["arrived"] and not announced:
+        if s["arrived"] and not announced:
             print(
-                f"[phase1] ARRIVED at ({status['x']:+.2f}, {status['y']:+.2f}) "
+                f"[phase1] ARRIVED at ({s['x']:+.2f}, {s['y']:+.2f}) "
                 f"after {frames} steps",
                 flush=True,
             )
             announced = True
-        elif not status["arrived"]:
+        elif not s["arrived"]:
             announced = False
 
         if frames % PRINT_EVERY == 0:
             print(
-                f"[phase1] pos=({status['x']:+.2f},{status['y']:+.2f}) "
-                f"alt={status['altitude']:.2f}m "
-                f"dist={status['distance']:5.2f}m "
-                f"bearing_err={status['bearing_error']:+.3f}rad "
-                f"{'HOLD' if status['arrived'] else 'FLY '}",
+                f"[phase1] ({s['x']:+.2f},{s['y']:+.2f}) "
+                f"alt={s['altitude']:.2f} "
+                f"d={s['distance']:5.2f} "
+                f"brg={s['bearing_error']:+.3f} "
+                f"{'HOLD' if s['arrived'] else 'FLY '} | "
+                f"aerr={s['alt_err']:+.3f} "
+                f"I={s['integral']:+.3f} "
+                f"vin={s['vertical_input']:+.3f} "
+                f"yin={s['yaw_input']:+.3f} "
+                f"pd={s['pitch_disturbance']:.3f} "
+                f"T={s['thrust']:.2f}",
                 flush=True,
             )
 
