@@ -20,6 +20,21 @@ retina:
   camera_width: 400
   camera_height: 240
 
+optical_flow:
+  # Which front-end drives the drone. Both implement the same interface and
+  # produce the same FlowField contract, so this is a genuine swap.
+  #   lucas_kanade — least-squares velocity estimates, calibrated in px/frame
+  #   emd          — Reichardt correlators, what the fly actually has
+  method: "lucas_kanade"
+  # Side length of the neighbourhood assumed to share one flow vector. Must
+  # be odd. At 40 columns wide, 5 is already an eighth of the field.
+  window: 5
+  # Below this smaller-eigenvalue threshold the local structure tensor is
+  # singular: an untextured patch, or a straight edge where the flow
+  # component along the edge is unobservable. Those locations report zero
+  # rather than a fabricated vector.
+  min_eigenvalue: 0.0001
+
 emd:
   # Delay is an exponential moving average, not the raw previous frame: a
   # single previous frame ties the delay length to the frame rate, while the
