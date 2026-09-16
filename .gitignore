@@ -25,3 +25,4 @@ recordings/
 *.mp4
 *.png
 !docs/*.png
+demo_frame.png
