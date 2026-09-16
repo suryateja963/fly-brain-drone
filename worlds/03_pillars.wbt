@@ -1,0 +1,372 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Roughcast.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
+
+WorldInfo {
+  info [
+    "Pillar forest -- the demo centrepiece."
+    "Drone flies through using optic flow alone: expansion difference"
+    "steers, total expansion brakes. No map, no planner, no learning."
+  ]
+  title "Fly-Brain Drone - 03 pillar forest"
+  basicTimeStep 8
+  defaultDamping Damping {
+    linear 0.5
+    angular 0.5
+  }
+}
+Viewpoint {
+  orientation -0.25 -0.05 0.97 2.6
+  position 6.5 -8.0 6.0
+  near 0.2
+  follow "Mavic 2 PRO"
+  followSmoothness 0.2
+}
+TexturedBackground {
+  luminosity 3
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 100 100
+  tileSize 2 2
+  appearance Parquetry {
+    type "chequered"
+  }
+}
+Solid {
+  translation 2.32 -3.92 2.0
+  name "pillar_0"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.39
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.39
+  }
+}
+Solid {
+  translation 4.47 -3.46 2.0
+  name "pillar_1"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.34
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.34
+  }
+}
+Solid {
+  translation 6.86 -3.49 2.0
+  name "pillar_2"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.29
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.29
+  }
+}
+Solid {
+  translation 9.63 -4.02 2.0
+  name "pillar_3"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.3
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.3
+  }
+}
+Solid {
+  translation 12.02 -3.11 2.0
+  name "pillar_4"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.3
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.3
+  }
+}
+Solid {
+  translation 2.22 -0.75 2.0
+  name "pillar_5"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.44
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.44
+  }
+}
+Solid {
+  translation 4.98 -1.02 2.0
+  name "pillar_6"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.45
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.45
+  }
+}
+Solid {
+  translation 6.85 -0.47 2.0
+  name "pillar_7"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.33
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.33
+  }
+}
+Solid {
+  translation 9.34 -1.36 2.0
+  name "pillar_8"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.33
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.33
+  }
+}
+Solid {
+  translation 12.42 -1.28 2.0
+  name "pillar_9"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.38
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.38
+  }
+}
+Solid {
+  translation 2.64 1.55 2.0
+  name "pillar_10"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.37
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.37
+  }
+}
+Solid {
+  translation 4.46 1.17 2.0
+  name "pillar_11"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.32
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.32
+  }
+}
+Solid {
+  translation 7.48 1.61 2.0
+  name "pillar_12"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.33
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.33
+  }
+}
+Solid {
+  translation 9.79 1.64 2.0
+  name "pillar_13"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.33
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.33
+  }
+}
+Mavic2Pro {
+  translation 0 0 0.1
+  rotation 0 0 1 0
+  controller "fly_brain"
+  extensionSlot [
+    Camera {
+      name "forward_camera"
+      translation 0.1 0 0
+      rotation 0 1 0 0
+      width 400
+      height 240
+      fieldOfView 1.2
+      near 0.05
+    }
+  ]
+  cameraSlot [
+    Camera {
+      width 400
+      height 240
+      near 0.2
+    }
+  ]
+}

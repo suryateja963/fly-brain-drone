@@ -1,0 +1,173 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Roughcast.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
+
+WorldInfo {
+  info [
+    "Obstacles placed directly between start and target (5, 3)."
+    "Tests ARBITRATION: the sigmoid blend must dodge and still arrive."
+    "A hard switch here produces a dodge-return limit cycle."
+  ]
+  title "Fly-Brain Drone - 04 target behind obstacles"
+  basicTimeStep 8
+  defaultDamping Damping {
+    linear 0.5
+    angular 0.5
+  }
+}
+Viewpoint {
+  orientation -0.25 -0.05 0.97 2.6
+  position 6.5 -8.0 6.0
+  near 0.2
+  follow "Mavic 2 PRO"
+  followSmoothness 0.2
+}
+TexturedBackground {
+  luminosity 3
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 100 100
+  tileSize 2 2
+  appearance Parquetry {
+    type "chequered"
+  }
+}
+Solid {
+  translation 4.0 0.6 2.0
+  name "blocker_0"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.35
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.35
+  }
+}
+Solid {
+  translation 4.2 -0.8 2.0
+  name "blocker_1"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.35
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.35
+  }
+}
+Solid {
+  translation 6.5 1.4 2.0
+  name "blocker_2"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.35
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.35
+  }
+}
+Solid {
+  translation 6.8 -1.2 2.0
+  name "blocker_3"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.0
+        radius 0.35
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.0
+    radius 0.35
+  }
+}
+Solid {
+  translation 5.4 2.8 1.5
+  rotation 0 0 1 0.0
+  name "screen"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.82 0.78 0.72
+        textureTransform TextureTransform {
+          scale 4 3
+        }
+      }
+      geometry Box {
+        size 3.0 0.3 3.0
+      }
+    }
+  ]
+  boundingObject Box {
+    size 3.0 0.3 3.0
+  }
+}
+Mavic2Pro {
+  translation 0 0 0.1
+  rotation 0 0 1 0
+  controller "fly_brain"
+  extensionSlot [
+    Camera {
+      name "forward_camera"
+      translation 0.1 0 0
+      rotation 0 1 0 0
+      width 400
+      height 240
+      fieldOfView 1.2
+      near 0.05
+    }
+  ]
+  cameraSlot [
+    Camera {
+      width 400
+      height 240
+      near 0.2
+    }
+  ]
+}

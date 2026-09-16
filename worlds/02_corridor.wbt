@@ -1,30 +1,19 @@
 #VRML_SIM R2025a utf8
 
-# Phase 1 diagnostic world: isolates the ALTITUDE loop from the position loop.
-#
-# The drone starts at the origin and TARGET_X/TARGET_Y are set to the origin
-# too (see HOVER_TEST in fly_brain.py), so distance is ~0 from the first step:
-# no translation, no forward lean, no bearing to chase. The only loop doing
-# any work is altitude.
-#
-# This exists because the altitude equilibrium (vin ~ +0.648, alt ~ 1.01m
-# against a 1.5m command) held identical across integral ceilings of 1.2, 2.5,
-# 6.0 and 3.0. That invariance says the integral is not the constraint, but
-# every measurement so far was taken while the drone was also translating.
-# This world removes that confound.
-
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Roughcast.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
 
 WorldInfo {
   info [
-    "Phase 1 diagnostic - pure hover, no translation."
-    "Set HOVER_TEST = True in fly_brain.py before running this world."
+    "Corridor with textured walls. Tests the centring response:"
+    "balanced expansion left and right holds the drone mid-channel."
+    "Walls are Roughcast textured -- a blank wall yields NO optic flow."
   ]
-  title "Fly-Brain Drone - 01c hover"
+  title "Fly-Brain Drone - 02 corridor"
   basicTimeStep 8
   defaultDamping Damping {
     linear 0.5
@@ -32,8 +21,8 @@ WorldInfo {
   }
 }
 Viewpoint {
-  orientation -0.1 -0.02 0.995 2.9
-  position 4.0 -3.0 2.2
+  orientation -0.25 -0.05 0.97 2.6
+  position 6.5 -8.0 6.0
   near 0.2
   follow "Mavic 2 PRO"
   followSmoothness 0.2
@@ -48,6 +37,48 @@ Floor {
   tileSize 2 2
   appearance Parquetry {
     type "chequered"
+  }
+}
+Solid {
+  translation 6.0 2.2 1.5
+  rotation 0 0 1 0.0
+  name "wall_left"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.82 0.78 0.72
+        textureTransform TextureTransform {
+          scale 4 3
+        }
+      }
+      geometry Box {
+        size 14.0 0.3 3.0
+      }
+    }
+  ]
+  boundingObject Box {
+    size 14.0 0.3 3.0
+  }
+}
+Solid {
+  translation 6.0 -2.2 1.5
+  rotation 0 0 1 0.0
+  name "wall_right"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.82 0.78 0.72
+        textureTransform TextureTransform {
+          scale 4 3
+        }
+      }
+      geometry Box {
+        size 14.0 0.3 3.0
+      }
+    }
+  ]
+  boundingObject Box {
+    size 14.0 0.3 3.0
   }
 }
 Mavic2Pro {

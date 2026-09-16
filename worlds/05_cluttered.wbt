@@ -1,0 +1,566 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Roughcast.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
+
+WorldInfo {
+  info [
+    "Enclosed room, dense random clutter. Stress test."
+    "Walls on all four sides mean no escape route: the drone must"
+    "genuinely navigate rather than drift out of trouble."
+  ]
+  title "Fly-Brain Drone - 05 cluttered room"
+  basicTimeStep 8
+  defaultDamping Damping {
+    linear 0.5
+    angular 0.5
+  }
+}
+Viewpoint {
+  orientation -0.25 -0.05 0.97 2.6
+  position 6.5 -8.0 6.0
+  near 0.2
+  follow "Mavic 2 PRO"
+  followSmoothness 0.2
+}
+TexturedBackground {
+  luminosity 3
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 100 100
+  tileSize 2 2
+  appearance Parquetry {
+    type "chequered"
+  }
+}
+Solid {
+  translation 0.0 7.0 1.5
+  rotation 0 0 1 0.0
+  name "room_n"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.82 0.78 0.72
+        textureTransform TextureTransform {
+          scale 4 3
+        }
+      }
+      geometry Box {
+        size 18.0 0.3 3.0
+      }
+    }
+  ]
+  boundingObject Box {
+    size 18.0 0.3 3.0
+  }
+}
+Solid {
+  translation 0.0 -7.0 1.5
+  rotation 0 0 1 0.0
+  name "room_s"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.82 0.78 0.72
+        textureTransform TextureTransform {
+          scale 4 3
+        }
+      }
+      geometry Box {
+        size 18.0 0.3 3.0
+      }
+    }
+  ]
+  boundingObject Box {
+    size 18.0 0.3 3.0
+  }
+}
+Solid {
+  translation 9.0 0.0 1.5
+  rotation 0 0 1 0.0
+  name "room_e"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.82 0.78 0.72
+        textureTransform TextureTransform {
+          scale 4 3
+        }
+      }
+      geometry Box {
+        size 0.3 14.0 3.0
+      }
+    }
+  ]
+  boundingObject Box {
+    size 0.3 14.0 3.0
+  }
+}
+Solid {
+  translation -9.0 0.0 1.5
+  rotation 0 0 1 0.0
+  name "room_w"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.82 0.78 0.72
+        textureTransform TextureTransform {
+          scale 4 3
+        }
+      }
+      geometry Box {
+        size 0.3 14.0 3.0
+      }
+    }
+  ]
+  boundingObject Box {
+    size 0.3 14.0 3.0
+  }
+}
+Solid {
+  translation 2.82 3.13 1.65
+  name "clutter_0"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.3
+        radius 0.36
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.3
+    radius 0.36
+  }
+}
+Solid {
+  translation -1.29 5.46 1.2
+  name "clutter_1"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 2.4
+        radius 0.29
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 2.4
+    radius 0.29
+  }
+}
+Solid {
+  translation -3.21 -2.64 1.35
+  name "clutter_2"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 2.7
+        radius 0.3
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 2.7
+    radius 0.3
+  }
+}
+Solid {
+  translation -5.44 -1.92 1.7
+  name "clutter_3"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.4
+        radius 0.29
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.4
+    radius 0.29
+  }
+}
+Solid {
+  translation -4.08 -4.72 1.7
+  name "clutter_4"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.4
+        radius 0.26
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.4
+    radius 0.26
+  }
+}
+Solid {
+  translation -1.37 2.57 1.5
+  name "clutter_5"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.0
+        radius 0.44
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.0
+    radius 0.44
+  }
+}
+Solid {
+  translation -5.56 2.51 1.5
+  name "clutter_6"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.0
+        radius 0.43
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.0
+    radius 0.43
+  }
+}
+Solid {
+  translation 2.55 -2.21 2.05
+  name "clutter_7"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 4.1
+        radius 0.47
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 4.1
+    radius 0.47
+  }
+}
+Solid {
+  translation 4.48 4.99 1.7
+  name "clutter_8"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.4
+        radius 0.27
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.4
+    radius 0.27
+  }
+}
+Solid {
+  translation 3.6 3.32 1.15
+  name "clutter_9"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 2.3
+        radius 0.32
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 2.3
+    radius 0.32
+  }
+}
+Solid {
+  translation 2.08 -4.35 1.0
+  name "clutter_10"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 2.0
+        radius 0.41
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 2.0
+    radius 0.41
+  }
+}
+Solid {
+  translation -5.26 -0.22 1.45
+  name "clutter_12"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 2.9
+        radius 0.35
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 2.9
+    radius 0.35
+  }
+}
+Solid {
+  translation 6.0 4.03 1.3
+  name "clutter_13"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 2.6
+        radius 0.47
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 2.6
+    radius 0.47
+  }
+}
+Solid {
+  translation -6.62 -1.36 1.9
+  name "clutter_14"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.8
+        radius 0.23
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.8
+    radius 0.23
+  }
+}
+Solid {
+  translation -3.19 -4.09 1.5
+  name "clutter_15"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.0
+        radius 0.29
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.0
+    radius 0.29
+  }
+}
+Solid {
+  translation 3.66 -0.43 1.85
+  name "clutter_16"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.7
+        radius 0.29
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.7
+    radius 0.29
+  }
+}
+Solid {
+  translation -6.34 -3.2 1.95
+  name "clutter_17"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.9
+        radius 0.41
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.9
+    radius 0.41
+  }
+}
+Solid {
+  translation -5.53 -4.77 1.8
+  name "clutter_18"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 3.6
+        radius 0.35
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 3.6
+    radius 0.35
+  }
+}
+Solid {
+  translation -6.77 -0.7 1.1
+  name "clutter_19"
+  children [
+    Shape {
+      appearance Roughcast {
+        colorOverride 0.75 0.72 0.68
+        textureTransform TextureTransform {
+          scale 3 6
+        }
+      }
+      geometry Cylinder {
+        height 2.2
+        radius 0.28
+      }
+    }
+  ]
+  boundingObject Cylinder {
+    height 2.2
+    radius 0.28
+  }
+}
+Mavic2Pro {
+  translation 0 0 0.1
+  rotation 0 0 1 0
+  controller "fly_brain"
+  extensionSlot [
+    Camera {
+      name "forward_camera"
+      translation 0.1 0 0
+      rotation 0 1 0 0
+      width 400
+      height 240
+      fieldOfView 1.2
+      near 0.05
+    }
+  ]
+  cameraSlot [
+    Camera {
+      width 400
+      height 240
+      near 0.2
+    }
+  ]
+}

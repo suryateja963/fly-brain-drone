@@ -52,7 +52,18 @@ pooling:
   # Gain converting measured yaw rate (rad/s) into the flow units the pooled
   # rotation channel uses. Rotation must be subtracted BEFORE expansion is
   # computed, or yaw in open space produces phantom obstacles.
-  yaw_rate_to_flow: 1.0
+  #
+  # DERIVED from camera geometry, not guessed. A yaw of w rad/s displaces the
+  # image by w*dt radians, and one retina column spans fov/cols radians:
+  #
+  #   yaw_rate_to_flow = dt / (fov / cols) = 0.008 / (0.7854 / 40) = 0.407
+  #
+  # MEASURED: at the placeholder 1.0 the subtraction removed the wrong amount
+  # and the residual appeared as a mirrored pair in L and R (+0.342/-0.352).
+  # That cancels in total_expansion -- so braking stayed correct -- but
+  # DOUBLES in the difference, which is what steers. The drone was turning
+  # away from its own rotation.
+  yaw_rate_to_flow: 0.407
 
 avoidance:
   turn_gain: 1.0          # UNTUNED — expansion difference to turn rate

@@ -610,7 +610,23 @@ def run_phase2(robot, timestep):
 
     cfg = get_config()
 
-    camera = robot.getDevice("camera")
+    # MEASURED: the Mavic2Pro's cameraSlot camera is GIMBAL-STABILISED and
+    # points at the ground. It sees the textured floor -- which produced
+    # plausible-looking flow during turns -- but never sees obstacles ahead.
+    # The drone flew into a pillar with L=R=0.000 while a pillar sat 2m away.
+    #
+    # Optic-flow obstacle avoidance needs a camera rigidly fixed to the
+    # airframe looking where the drone is going, so the worlds now carry a
+    # forward_camera in the extensionSlot. Fall back to the gimbal camera so
+    # a world without one still runs.
+    camera = robot.getDevice("forward_camera")
+    if camera is None:
+        camera = robot.getDevice("camera")
+        print(
+            "[phase2] WARNING: no forward_camera in this world; using the "
+            "gimbal camera, which points DOWN and cannot see obstacles",
+            flush=True,
+        )
     camera.enable(timestep)
     imu = robot.getDevice("inertial unit")
     imu.enable(timestep)

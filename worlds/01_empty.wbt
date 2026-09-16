@@ -44,6 +44,17 @@ Mavic2Pro {
   translation 0 0 0.1
   rotation 0 0 1 0
   controller "fly_brain"
+  extensionSlot [
+    Camera {
+      name "forward_camera"
+      translation 0.1 0 0
+      rotation 0 1 0 0
+      width 400
+      height 240
+      fieldOfView 1.2
+      near 0.05
+    }
+  ]
   cameraSlot [
     Camera {
       width 400
