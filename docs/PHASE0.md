@@ -37,8 +37,22 @@ work, the problem is the install, not your code.
 
 ## 5. Run your controller
 
-In the same world, select the `Mavic2Pro` node in the scene tree, set its
-`controller` field to `fly_brain`, save, and reload the world.
+**Open `worlds/01_empty.wbt` from this repository** — *File → Open World*,
+then browse to `D:\Fly-Brain Drone\worlds\01_empty.wbt`.
+
+That world already has `controller "fly_brain"` set on the drone, so there is
+nothing to select and nothing to save. Press play and it runs.
+
+### Why not the bundled sample world
+
+Webots only offers controllers belonging to the *same project* as the open
+world. A project is any directory holding `worlds/` and `controllers/`
+side by side. The bundled `mavic_2_pro.wbt` lives inside the Webots install
+tree, whose project contains only `mavic2pro` and `mavic2pro_patrol` — so
+`fly_brain` never appears in its dropdown, and cannot be selected there.
+
+This repository is its own project: `worlds/` and `controllers/` sit beside
+each other at the root, which is what makes `fly_brain` resolvable.
 
 ## Exit test
 

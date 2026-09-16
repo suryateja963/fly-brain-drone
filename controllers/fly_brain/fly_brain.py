@@ -56,7 +56,10 @@ MAX_PITCH_DISTURBANCE = 0.6
 # sideways along a curved path instead of flying the bearing.
 FACING_TOLERANCE = 0.5  # radians
 
-PRINT_EVERY = 16
+# The Mavic worlds use basicTimeStep 8, so the control loop runs at 125Hz.
+# Printing every 16th step is 8 lines/second — faster than you can read.
+# 125 gives roughly one line per second.
+PRINT_EVERY = 125
 
 
 def wrap_angle(radians):
