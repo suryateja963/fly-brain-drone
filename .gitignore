@@ -11,6 +11,10 @@ venv/
 worlds/.*.wbproj
 worlds/*.wbt.bak
 
+# Webots also writes a hidden .<world>.jpg thumbnail beside each world when
+# it saves. Regenerated on demand; not source.
+worlds/.*.jpg
+
 # A Webots install inside the project folder. 250MB of third-party binaries
 # that must never reach the repo — the installer defaults here if you point
 # it at the project directory.
