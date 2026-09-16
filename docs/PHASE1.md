@@ -34,6 +34,20 @@ If yours does not, add a GPS node to the robot's `extensionSlot`.
 Takes off, flies to the target, and **hovers stably for 30 s** — position
 holding within roughly 0.3 m, no drift, no wobble, no slow circling.
 
+### Do not save the world while the simulation is running
+
+Webots writes the drone's *current* position into the `.wbt` when you save,
+along with `hidden linearVelocity` / `angularVelocity` fields. Save mid-flight
+and the drone's start position becomes wherever it happened to be — the next
+run then begins at the target and prints `ARRIVED after 1 steps`, which tests
+nothing. A save can also silently drop the floor's `appearance`, leaving an
+untextured floor that generates **zero optic flow** and would send you
+debugging the EMD layer in Phase 2 when the world is at fault.
+
+If it happens: `git checkout worlds/01_empty.wbt` restores a clean start.
+
+To reset between runs use **revert** (`Ctrl+Shift+R`), never save.
+
 ## Tuning order
 
 One gain at a time, in this order. Changing two at once makes it impossible

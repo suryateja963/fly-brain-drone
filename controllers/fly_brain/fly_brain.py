@@ -56,8 +56,17 @@ K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
 # The clamp must stay well clear of the integral the loop needs at
 # equilibrium, or it becomes the binding constraint and the drone settles
 # short with the integral pinned at the clamp.
-K_VERTICAL_I = 0.45
-MAX_VERTICAL_INTEGRAL = 3.0
+# Measured: 0.45 with a 3.0 clamp overshot to 2.29m against a 1.5m command,
+# then sagged back through target and kept falling — the integral wound up
+# during the climb, and had to unwind again. The clamp also let it accumulate
+# far more than equilibrium needs.
+K_VERTICAL_I = 0.15
+MAX_VERTICAL_INTEGRAL = 1.0
+
+# Only integrate once the altitude error is inside this band. Outside it the
+# proportional term does the climbing; integrating through a large error just
+# winds the integral up and guarantees an overshoot.
+INTEGRAL_BAND = 0.4  # metres
 
 K_ROLL_P = 50.0             # attitude stabilisation, not steering
 K_PITCH_P = 30.0
@@ -241,11 +250,18 @@ class Phase1Controller:
 
         # --- Altitude -> thrust (PI, not P)
         altitude_error = clamp(TARGET_ALTITUDE - altitude, -1.0, 1.0)
-        self.altitude_integral = clamp(
-            self.altitude_integral + altitude_error * (self.timestep / 1000.0),
-            -MAX_VERTICAL_INTEGRAL,
-            MAX_VERTICAL_INTEGRAL,
-        )
+
+        # Conditional integration. Only accumulate once inside the trim band:
+        # the integral exists to close a small residual offset, not to drive
+        # the climb. Integrating through a 1.4m error winds up on the way up,
+        # overshoots (measured: 2.29m against a 1.5m command), then has to
+        # unwind — which is what produced the sag back through target.
+        if abs(altitude_error) < INTEGRAL_BAND:
+            self.altitude_integral = clamp(
+                self.altitude_integral + altitude_error * (self.timestep / 1000.0),
+                -MAX_VERTICAL_INTEGRAL,
+                MAX_VERTICAL_INTEGRAL,
+            )
         vertical_input = (
             K_VERTICAL_P * (altitude_error ** 3.0)
             + K_VERTICAL_I * self.altitude_integral

@@ -11,6 +11,8 @@ WorldInfo {
     "Phase 0 and Phase 1 world for the fly-brain drone."
     "Empty except for a textured floor: nothing to collide with, and enough"
     "floor texture to generate optic flow once Phase 2 needs it."
+    "The drone MUST start at the origin — Phase 1's exit test is the flight"
+    "to the target, so a start position saved mid-flight invalidates the run."
   ]
   title "Fly-Brain Drone - 01 empty"
   basicTimeStep 8
