@@ -118,6 +118,9 @@ class FlyBrainPipeline:
         "_goal_position",
         "_elapsed",
         "_returning_home",
+        "_altitude_integral",
+        "_previous_altitude",
+        "_turning",
     )
 
     def __init__(self, cfg, goal_position: np.ndarray = None) -> None:
@@ -151,6 +154,12 @@ class FlyBrainPipeline:
         self._elapsed = 0.0
         self._returning_home = False
 
+        # Flight control state, carried between steps. Starts turning so
+        # the drone squares up to the goal before translating.
+        self._altitude_integral = 0.0
+        self._previous_altitude = None
+        self._turning = True
+
     # -----------------------------------------------------------------
     # The step
     # -----------------------------------------------------------------
@@ -171,6 +180,10 @@ class FlyBrainPipeline:
         dt: float,
         gps_position: np.ndarray = None,
         obstacles: List[np.ndarray] = None,
+        roll: float = 0.0,
+        pitch: float = 0.0,
+        roll_rate: float = 0.0,
+        pitch_rate: float = 0.0,
     ) -> PipelineState:
         """One control cycle, sensors to motor commands.
 
@@ -252,7 +265,11 @@ class FlyBrainPipeline:
         )
 
         # --- Motors ----------------------------------------------------
-        state.motors = self._to_motors(state, yaw, altitude, dt)
+        state.motors = self._to_motors(
+            state, yaw, altitude, dt,
+            roll=roll, pitch=pitch,
+            roll_rate=roll_rate, pitch_rate=pitch_rate,
+        )
 
         self._record_incidents(state)
         self._telemetry.update(
@@ -375,39 +392,113 @@ class FlyBrainPipeline:
     # -----------------------------------------------------------------
 
     def _to_motors(
-        self, state: PipelineState, yaw: float, altitude: float, dt: float
+        self,
+        state: PipelineState,
+        yaw: float,
+        altitude: float,
+        dt: float,
+        roll: float = 0.0,
+        pitch: float = 0.0,
+        roll_rate: float = 0.0,
+        pitch_rate: float = 0.0,
     ) -> MotorCommands:
-        """Convert the arbitrated command into four rotor values."""
+        """Convert the arbitrated command into four rotor values.
+
+        This reuses the flight control that Phase 1 arrived at over twelve
+        measured debugging runs. An earlier version of this method was a
+        naive reimplementation and it CRASHED ON TAKEOFF in the first flight
+        test — altitude 0.02m, yaw spun to -2.78 rad. It repeated three
+        mistakes Phase 1 had already paid for:
+
+          - a proportional-only altitude term, ignoring the tuned I and D
+            gains sitting in config. A P-only loop on a cubic error cannot
+            close a steady-state offset (measured: settled 0.90m against a
+            1.5m command) and a PI loop without damping oscillates.
+          - full yaw gain applied while simultaneously leaning forward.
+            yaw_input enters all four rotors with alternating sign, so it
+            fights the attitude stabilisation directly; Phase 1 solved this
+            by turning BEFORE translating, not by turning harder.
+          - roll_input hardcoded to zero, so nothing held the aircraft level.
+
+        The lesson is in the architecture now: the flight control layer is
+        not something to rewrite from first principles per pipeline.
+        """
         arbitration: ArbitrationOutput = state.arbitration
+        flight = self._cfg.flight
 
         heading_error = circular_difference(arbitration.final_heading, yaw)
-        yaw_input = self._cfg.flight.k_yaw_p * heading_error
 
-        altitude_error = arbitration.final_altitude - altitude
-        vertical_input = self._cfg.flight.k_vertical_p * np.clip(
-            altitude_error, -1.0, 1.0
+        # --- Altitude: full PID, using the gains that were actually tuned.
+        altitude_error = float(np.clip(arbitration.final_altitude - altitude, -1.0, 1.0))
+
+        integral_step = altitude_error * dt
+        at_high = self._altitude_integral >= flight.max_vertical_integral
+        at_low = self._altitude_integral <= -flight.max_vertical_integral
+        if not (at_high and integral_step > 0) and not (at_low and integral_step < 0):
+            self._altitude_integral = float(
+                np.clip(
+                    self._altitude_integral + integral_step,
+                    -flight.max_vertical_integral,
+                    flight.max_vertical_integral,
+                )
+            )
+
+        if self._previous_altitude is None:
+            vertical_rate = 0.0
+        else:
+            vertical_rate = (altitude - self._previous_altitude) / dt
+        self._previous_altitude = altitude
+
+        vertical_input = (
+            flight.k_vertical_p * (altitude_error ** 3.0)
+            + flight.k_vertical_i * self._altitude_integral
+            - flight.k_vertical_d * vertical_rate
         )
 
-        # Forward lean scales with commanded speed, reduced while badly
-        # misaligned so the drone finishes turning before building speed.
-        facing = float(np.cos(heading_error))
-        pitch_disturbance = float(
-            np.clip(
-                self._cfg.flight.k_forward_p
-                * arbitration.final_speed
-                * max(0.0, facing),
-                0.0,
-                self._cfg.flight.max_pitch_disturbance,
+        # --- TURN before CRUISE, with hysteresis between the states.
+        if self._turning:
+            if abs(heading_error) < flight.turn_exit:
+                self._turning = False
+        elif abs(heading_error) > flight.turn_enter:
+            self._turning = True
+
+        # --- Yaw authority fades close to the goal, where bearing is noise.
+        to_goal = float(
+            np.linalg.norm(self._goal_position - state.path_state.position_estimate)
+        )
+        yaw_authority = float(np.clip(to_goal / flight.yaw_fade_start, 0.0, 1.0))
+        yaw_input = flight.k_yaw_p * heading_error * yaw_authority
+
+        # --- Forward lean: suppressed entirely while turning, so the
+        # rotation finishes before speed builds.
+        if self._turning:
+            pitch_disturbance = 0.0
+        else:
+            facing = max(0.0, float(np.cos(heading_error)))
+            pitch_disturbance = float(
+                np.clip(
+                    flight.k_forward_p * arbitration.final_speed * facing,
+                    0.0,
+                    flight.max_pitch_disturbance,
+                )
             )
+
+        # --- Attitude stabilisation. Without this nothing holds the
+        # aircraft level and it tips at the first lateral command.
+        roll_input = flight.k_roll_p * float(np.clip(roll, -1.0, 1.0)) + roll_rate
+        pitch_input = (
+            flight.k_pitch_p * float(np.clip(pitch, -1.0, 1.0))
+            + pitch_rate
+            - pitch_disturbance
         )
 
         commands = self._bottleneck.descend(
-            roll_input=0.0,
-            pitch_input=-pitch_disturbance,
+            roll_input=roll_input,
+            pitch_input=pitch_input,
             yaw_input=yaw_input,
             vertical_input=vertical_input,
             altitude=altitude,
-            vertical_rate=0.0,
+            vertical_rate=vertical_rate,
         )
 
         if state.motor_health.degraded_mode:

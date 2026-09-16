@@ -96,7 +96,11 @@ flight:
   # 69.3 made the controller command negative vertical input.
   base_thrust: 68.5
   k_vertical_p: 3.0
-  k_vertical_i: 0.10
+  # MEASURED: 0.10 saturated its clamp yet contributed only 0.30, giving
+  # T=69.09 -- below the 69.15 that was measured to hold just 1.01m. The
+  # GAIN limited authority here, not the ceiling. 0.35 is the value Phase 1
+  # arrived at over twelve runs.
+  k_vertical_i: 0.35
   k_vertical_d: 3.0
   max_vertical_integral: 3.0
   k_roll_p: 50.0

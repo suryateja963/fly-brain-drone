@@ -27,7 +27,7 @@ import math
 
 from controller import Robot
 
-PHASE = 1
+PHASE = 2
 
 # ---- Waypoint ------------------------------------------------------------
 TARGET_X = 5.0
@@ -596,12 +596,144 @@ def run_phase1(robot, timestep):
             )
 
 
+def run_phase2(robot, timestep):
+    """Full pipeline: vision, avoidance, navigation, compliance, failsafes.
+
+    Phase 1 above is kept deliberately and stays selectable. It is the only
+    flight mode with a known-good history, so it is the fallback if this
+    misbehaves, and the comparison baseline when tuning.
+    """
+    import numpy as np
+
+    from config import get_config
+    from pipeline import FlyBrainPipeline
+
+    cfg = get_config()
+
+    camera = robot.getDevice("camera")
+    camera.enable(timestep)
+    imu = robot.getDevice("inertial unit")
+    imu.enable(timestep)
+    gps = robot.getDevice("gps")
+    gps.enable(timestep)
+    gyro = robot.getDevice("gyro")
+    gyro.enable(timestep)
+
+    motors = []
+    for name in (
+        "front left propeller",
+        "front right propeller",
+        "rear left propeller",
+        "rear right propeller",
+    ):
+        motor = robot.getDevice(name)
+        motor.setPosition(float("inf"))
+        motor.setVelocity(1.0)
+        motors.append(motor)
+
+    pipeline = FlyBrainPipeline(cfg, goal_position=np.array([TARGET_X, TARGET_Y]))
+
+    print(f"[phase2] timestep={timestep}ms", flush=True)
+    print(
+        f"[phase2] flow front-end: {cfg.optical_flow.method}", flush=True
+    )
+    print(
+        f"[phase2] goal=({TARGET_X}, {TARGET_Y}) "
+        f"altitude={cfg.flight.target_altitude}m "
+        f"ceiling={cfg.altitude_cap.ceiling_m}m",
+        flush=True,
+    )
+
+    dt = timestep / 1000.0
+    last_motors = np.full(4, 68.5, dtype=np.float64)
+    previous_position = None
+    frames = 0
+
+    # One step so the sensors read before the first pipeline call.
+    if robot.step(timestep) == -1:
+        return
+
+    while robot.step(timestep) != -1:
+        frames += 1
+
+        raw = camera.getImage()
+        if raw is None:
+            continue
+        frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+            (camera.getHeight(), camera.getWidth(), 4)
+        )
+
+        gps_values = gps.getValues()
+        position = np.array([gps_values[0], gps_values[1]], dtype=np.float64)
+        altitude = float(gps_values[2])
+
+        roll, pitch, yaw = imu.getRollPitchYaw()
+        rates = gyro.getValues()
+        roll_rate = float(rates[0])
+        pitch_rate = float(rates[1])
+        yaw_rate = float(rates[2])
+
+        if previous_position is None:
+            actual_velocity = np.zeros(2, dtype=np.float64)
+        else:
+            actual_velocity = (position - previous_position) / dt
+        previous_position = position.copy()
+        speed = float(np.linalg.norm(actual_velocity))
+
+        state = pipeline.step(
+            frame=frame,
+            position=position,
+            altitude=altitude,
+            yaw=yaw,
+            yaw_rate=yaw_rate,
+            speed=speed,
+            acceleration=np.array([0.0, 0.0, 9.81]),
+            commanded_velocity=np.zeros(2, dtype=np.float64),
+            actual_velocity=actual_velocity,
+            motor_feedback=last_motors,
+            last_motors=last_motors,
+            dt=dt,
+            roll=roll,
+            pitch=pitch,
+            roll_rate=roll_rate,
+            pitch_rate=pitch_rate,
+        )
+
+        commands = state.motors.motors
+        motors[0].setVelocity(float(commands[0]))
+        motors[1].setVelocity(float(-commands[1]))
+        motors[2].setVelocity(float(-commands[2]))
+        motors[3].setVelocity(float(commands[3]))
+        last_motors = commands.copy()
+
+        if frames % PRINT_EVERY == 0:
+            channels = state.channels
+            print(
+                f"[phase2] ({position[0]:+.2f},{position[1]:+.2f}) "
+                f"alt={altitude:.2f} "
+                f"yaw={yaw:+.2f} | "
+                f"L={channels.left_expansion:+.3f} "
+                f"R={channels.right_expansion:+.3f} "
+                f"rot={channels.rotation:+.3f} "
+                f"urg={state.avoidance.urgency:.2f} "
+                f"aw={state.arbitration.avoidance_weight:.2f} | "
+                f"batt={state.battery_state.charge_pct:.0f}% "
+                f"{state.override_reason or 'mission'}",
+                flush=True,
+            )
+
+    print("", flush=True)
+    print(pipeline.telemetry.format_report(), flush=True)
+
+
 def main():
     robot = Robot()
     timestep = int(robot.getBasicTimeStep())
 
     if PHASE == 0:
         run_phase0(robot, timestep)
+    elif PHASE == 2:
+        run_phase2(robot, timestep)
     else:
         run_phase1(robot, timestep)
 
