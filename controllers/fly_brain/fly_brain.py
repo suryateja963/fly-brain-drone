@@ -39,14 +39,37 @@ RESUME_RADIUS = 0.60
 # then yaw (it should turn to face the target without overshooting), then
 # pitch last. Change one at a time.
 K_VERTICAL_P = 3.0          # altitude error -> thrust
-K_VERTICAL_OFFSET = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
-K_VERTICAL_THRUST = 68.5
+K_VERTICAL_THRUST = 68.5    # base thrust, roughly hover for the Mavic 2 Pro
+
+# A pure proportional term on a cubic error cannot close a steady-state
+# offset: thrust and gravity reach equilibrium below target and stay there
+# (measured: commanded 1.5m, settled flat at 0.90m). The integral term
+# accumulates the residual error and trims it out.
+# UNTUNED. The integral term is structurally right — a P-only loop on a cubic
+# error cannot close a steady-state offset, which is why the measured run sat
+# flat at 0.90m against a 1.5m command — but this gain is a starting guess,
+# not a tuned value. It must be tuned against the real airframe:
+#
+#   too low  -> settles short of TARGET_ALTITUDE (the bug this replaces)
+#   too high -> overshoots, then oscillates slowly about the target
+#
+# The clamp must stay well clear of the integral the loop needs at
+# equilibrium, or it becomes the binding constraint and the drone settles
+# short with the integral pinned at the clamp.
+K_VERTICAL_I = 0.45
+MAX_VERTICAL_INTEGRAL = 3.0
 
 K_ROLL_P = 50.0             # attitude stabilisation, not steering
 K_PITCH_P = 30.0
 
 K_YAW_P = 1.6               # bearing error -> yaw rate
 K_FORWARD_P = 0.22          # distance -> pitch (forward lean)
+
+# Braking. Without this the drone carries its momentum past the target when
+# pitch_disturbance drops to zero, overshoots, turns round, and orbits
+# forever. Opposing lean proportional to closing speed stops it on the mark.
+K_BRAKE = 0.9
+MAX_BRAKE = 0.5
 
 # Lean angle is what actually limits speed. Too much and the camera points at
 # the floor, which matters from Phase 2 onward.
@@ -55,6 +78,11 @@ MAX_PITCH_DISTURBANCE = 0.6
 # Don't translate until roughly facing the target, or the drone crabs
 # sideways along a curved path instead of flying the bearing.
 FACING_TOLERANCE = 0.5  # radians
+
+# Below this distance the bearing to target is dominated by noise — it swung
+# through a full pi in the measured run while the drone sat 0.1m away. Hold
+# the last heading instead of chasing a meaningless angle.
+BEARING_DEADZONE = 0.5  # metres
 
 # The Mavic worlds use basicTimeStep 8, so the control loop runs at 125Hz.
 # Printing every 16th step is 8 lines/second — faster than you can read.
@@ -114,6 +142,18 @@ class Phase1Controller:
             self.motors.append(motor)
 
         self.arrived = False
+
+        # Altitude PI state. The integral trims the steady-state offset a
+        # proportional term alone leaves (see K_VERTICAL_I).
+        self.altitude_integral = 0.0
+
+        # Previous horizontal position, for the closing-speed estimate the
+        # braking term needs. None until the first step has run.
+        self.prev_position = None
+
+        # Last bearing taken outside BEARING_DEADZONE. Held while close in,
+        # where the true bearing is noise.
+        self.last_bearing_error = 0.0
 
         # Which GPS component is "up" depends on the world's coordinateSystem:
         # ENU (Webots' modern default) puts altitude at index 2, NUE (used by
@@ -191,24 +231,53 @@ class Phase1Controller:
         elif distance > RESUME_RADIUS:
             self.arrived = False
 
-        bearing_error = wrap_angle(math.atan2(dy, dx) - yaw)
+        # Close to the target the bearing is noise: it swung through a full pi
+        # while the drone sat 0.1m away. Hold the last good heading instead.
+        if distance > BEARING_DEADZONE:
+            bearing_error = wrap_angle(math.atan2(dy, dx) - yaw)
+            self.last_bearing_error = bearing_error
+        else:
+            bearing_error = self.last_bearing_error
 
-        # --- Altitude -> thrust
+        # --- Altitude -> thrust (PI, not P)
         altitude_error = clamp(TARGET_ALTITUDE - altitude, -1.0, 1.0)
-        vertical_input = K_VERTICAL_P * (altitude_error ** 3.0)
+        self.altitude_integral = clamp(
+            self.altitude_integral + altitude_error * (self.timestep / 1000.0),
+            -MAX_VERTICAL_INTEGRAL,
+            MAX_VERTICAL_INTEGRAL,
+        )
+        vertical_input = (
+            K_VERTICAL_P * (altitude_error ** 3.0)
+            + K_VERTICAL_I * self.altitude_integral
+        )
 
         # --- Bearing -> yaw rate
         yaw_input = 0.0 if self.arrived else K_YAW_P * bearing_error
 
-        # --- Distance -> forward lean
-        # Only once roughly facing the target, and scaled down by how far off
-        # the bearing still is, so a turn is finished before speed builds.
+        # --- Distance -> forward lean, minus a braking term
+        # Closing speed along the bearing, from GPS deltas. Braking against it
+        # is what stops the drone on the mark instead of orbiting the target.
+        dt = self.timestep / 1000.0
+        if self.prev_position is None:
+            closing_speed = 0.0
+        else:
+            moved_x = x - self.prev_position[0]
+            moved_y = y - self.prev_position[1]
+            # Project movement onto the unit vector pointing at the target.
+            if distance > 1e-6:
+                closing_speed = (moved_x * dx + moved_y * dy) / (distance * dt)
+            else:
+                closing_speed = 0.0
+        self.prev_position = (x, y)
+
         if self.arrived or abs(bearing_error) > FACING_TOLERANCE:
             pitch_disturbance = 0.0
         else:
             facing = math.cos(bearing_error)
+            drive = K_FORWARD_P * distance * facing
+            brake = clamp(K_BRAKE * closing_speed, 0.0, MAX_BRAKE)
             pitch_disturbance = clamp(
-                K_FORWARD_P * distance * facing, 0.0, MAX_PITCH_DISTURBANCE
+                drive - brake, 0.0, MAX_PITCH_DISTURBANCE
             )
 
         # --- Attitude stabilisation (holds the aircraft level; not steering)

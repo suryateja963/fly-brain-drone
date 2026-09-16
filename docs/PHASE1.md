@@ -39,14 +39,29 @@ holding within roughly 0.3 m, no drift, no wobble, no slow circling.
 One gain at a time, in this order. Changing two at once makes it impossible
 to attribute what happened.
 
-1. **`K_VERTICAL_P`** — set `TARGET_X/Y` to the start position so it only
-   hovers. Climbs and holds altitude? Good. Oscillating up and down means
-   too high; sagging means too low.
-2. **`K_YAW_P`** — restore the real target. It should turn to face the
+1. **`K_VERTICAL_I`** — set `TARGET_X/Y` to the start position so it only
+   hovers, and watch the `alt=` column. It must reach `TARGET_ALTITUDE` and
+   stay there. **This is the one gain that most needs tuning**: it is
+   currently an untested guess.
+   - settles *below* target and sits flat → too low
+   - overshoots, then drifts slowly up and down → too high
+2. **`K_VERTICAL_P`** — only if the climb itself is wrong. Oscillating
+   rapidly means too high; a sluggish climb means too low.
+3. **`K_YAW_P`** — restore the real target. It should turn to face the
    target and stop. Overshooting past the bearing and swinging back means
    too high.
-3. **`K_FORWARD_P`** — last. Too high overshoots the waypoint and flies
-   back; too low crawls or never arrives.
+4. **`K_FORWARD_P`** and **`K_BRAKE`** — last, as a pair. Overshooting the
+   waypoint means `K_FORWARD_P` too high or `K_BRAKE` too low; crawling to a
+   stop short of it means the reverse.
+
+### Why altitude needs an integral
+
+A proportional term on a cubic error **cannot** close a steady-state offset:
+thrust and gravity find an equilibrium below target and stay there. The first
+measured run commanded 1.5 m and sat flat at 0.90 m for the whole flight. The
+integral accumulates that residual error and trims it out.
+
+The gain is a starting guess and has never been flown. Expect to move it.
 
 ## The up-axis
 
@@ -96,6 +111,9 @@ sideways along a curved path instead of flying the bearing.
 
 | Symptom | Cause |
 |---|---|
+| `alt=` settles flat, below `TARGET_ALTITUDE` | `K_VERTICAL_I` too low — a P-only loop cannot close this |
+| `alt=` overshoots then drifts up and down | `K_VERTICAL_I` too high |
+| Repeated `ARRIVED`, `bearing_err` winding through π | Overshooting past the target and orbiting — raise `K_BRAKE` |
 | Never leaves ground, `dist` barely changes | Up-axis detected wrong — see below |
 | Climbs then flips | Motor sign wrong — the diagonal pairs counter-rotate |
 | Never leaves ground | `K_VERTICAL_THRUST` below hover for this airframe |
