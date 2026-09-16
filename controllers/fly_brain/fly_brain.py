@@ -34,6 +34,18 @@ TARGET_X = 5.0
 TARGET_Y = 3.0
 TARGET_ALTITUDE = 1.5
 
+# Diagnostic mode for worlds/01c_hover.wbt. Puts the waypoint at the drone's
+# own start position, so distance is ~0 from the first step: no translation,
+# no forward lean, no bearing to chase, and the altitude loop is the only
+# thing doing work.
+#
+# Every altitude measurement so far was taken while the drone was also
+# translating. The equilibrium (vin ~ +0.648, alt ~ 1.01m against a 1.5m
+# command) held identical across integral ceilings of 1.2, 2.5, 6.0 and 3.0,
+# which says the integral is not the constraint — but that reading is only
+# trustworthy with the position loop removed. This flag removes it.
+HOVER_TEST = False
+
 # Stop translating inside this radius.
 #
 # Measured: with this at 0.35 the drone settled into a permanent orbit at
@@ -139,9 +151,16 @@ K_FORWARD_P = 0.22          # distance -> pitch (forward lean)
 # the floor, which matters from Phase 2 onward.
 MAX_PITCH_DISTURBANCE = 0.6
 
-# Don't translate until roughly facing the target, or the drone crabs
-# sideways along a curved path instead of flying the bearing.
-FACING_TOLERANCE = 0.5  # radians
+# TURN/CRUISE thresholds, in radians. Hysteresis: enter CRUISE only when
+# well aligned, drop back to TURN only when badly misaligned. A single
+# threshold makes the drone chatter between states on bearing noise.
+#
+# Replaces the old FACING_TOLERANCE gate, which had no hysteresis and, more
+# importantly, no way to ever CLOSE a heading error — it merely refused to
+# translate while misaligned, so a drone yawed 71deg off target sat there
+# indefinitely with its drive gated to zero.
+TURN_ENTER = 0.35   # above this misalignment, stop and turn
+TURN_EXIT = 0.12    # below this, resume cruising
 
 # The Mavic worlds use basicTimeStep 8, so the loop runs at 125Hz.
 PRINT_EVERY = 125
@@ -210,6 +229,17 @@ class Phase1Controller:
         self.arrived = False
         self.altitude_integral = 0.0
 
+        # TURN/CRUISE state. Starts True so the drone squares up to the target
+        # before moving, whatever heading the world gave it.
+        self.turning = True
+
+        # HOVER_TEST waypoint, captured on the first step rather than here:
+        # the GPS reads nothing until after the first robot.step(), the same
+        # ordering constraint the up-axis detection has.
+        self.hover_x = 0.0
+        self.hover_y = 0.0
+        self.hover_captured = False
+
         # Previous altitude, for the vertical-rate estimate the D term needs.
         # None until the first step has run.
         self.prev_altitude = None
@@ -270,8 +300,25 @@ class Phase1Controller:
         altitude = gps[self.up_axis]
         roll_rate, pitch_rate, _yaw_rate = self.gyro.getValues()
 
-        dx = TARGET_X - x
-        dy = TARGET_Y - y
+        # In HOVER_TEST the waypoint is the drone's own start position, so the
+        # position loop contributes nothing and only altitude is under test.
+        # Captured here rather than in __init__ because the GPS reads nothing
+        # until after the first robot.step().
+        if HOVER_TEST and not self.hover_captured:
+            self.hover_x = x
+            self.hover_y = y
+            self.hover_captured = True
+            print(
+                f"[phase1] hover waypoint pinned at "
+                f"({self.hover_x:+.2f}, {self.hover_y:+.2f})",
+                flush=True,
+            )
+
+        target_x = self.hover_x if HOVER_TEST else TARGET_X
+        target_y = self.hover_y if HOVER_TEST else TARGET_Y
+
+        dx = target_x - x
+        dy = target_y - y
         distance = math.hypot(dx, dy)
         self.arrived = distance < ARRIVE_RADIUS
 
@@ -344,8 +391,41 @@ class Phase1Controller:
         # zero every step and the station-keeping never ran at all. Close in
         # the gate is pointless anyway — cos(bearing) already scales the
         # drive, and at 0.2m there is no curved-path problem to prevent.
-        gated = (not self.arrived) and abs(bearing_error) > FACING_TOLERANCE
-        if gated:
+        # TURN before CRUISE, with hysteresis between them.
+        #
+        # yaw_input enters all four rotors with alternating sign, so it is the
+        # one term that directly fights the roll/pitch stabilisation: a large
+        # yaw command unbalances the diagonal pairs faster than K_ROLL_P and
+        # K_PITCH_P can correct, which is why raising K_YAW_P tipped the
+        # aircraft (yin +5.602, crashed at (4.21, 0.85)).
+        #
+        # So the fix is WHEN yaw acts, not how hard. Turning with zero forward
+        # lean lets the heading converge while the airframe is otherwise
+        # settled; cruising then starts with bearing_error already small, so
+        # yaw_input stays naturally tiny and never destabilises anything.
+        #
+        # Two thresholds, not one: entering CRUISE needs a tight heading, but
+        # leaving it needs a loose one, or the drone chatters between states
+        # on bearing noise mid-flight.
+        # The turn logic runs in HOLD too. Forcing turning=False on arrival
+        # locked the drone out of the very fix it needed: it sat 71deg off
+        # target (brg pinned at +1.245) with no way to square up, because the
+        # only code that closes a heading error was disabled exactly where the
+        # error persisted. Station-keeping still runs while it turns — the
+        # drive is scaled by cos(bearing_error), which handles the rest.
+        if self.turning:
+            if abs(bearing_error) < TURN_EXIT:
+                self.turning = False
+        elif abs(bearing_error) > TURN_ENTER:
+            self.turning = True
+
+        # Turning suppresses forward lean only OUTSIDE the arrival radius,
+        # where the point is to finish rotating before building speed. In
+        # HOLD it must not: the drone would lose station-keeping the moment
+        # it began squaring up, and drift — the same stranding that forcing
+        # turning=False on arrival used to cause, arriving by another route.
+        # cos(bearing_error) already shrinks the drive while badly aligned.
+        if self.turning and not self.arrived:
             pitch_disturbance = 0.0
         else:
             drive = K_FORWARD_P * distance * math.cos(bearing_error)
@@ -381,6 +461,7 @@ class Phase1Controller:
             "distance": distance,
             "bearing_error": bearing_error,
             "arrived": self.arrived,
+            "turning": self.turning,
             # Internal terms, so the next failure is diagnosable without
             # guessing which one is at fault.
             "alt_err": altitude_error,
@@ -443,6 +524,12 @@ def run_phase1(robot, timestep):
         f"[phase1] target=({TARGET_X}, {TARGET_Y}) altitude={TARGET_ALTITUDE}m",
         flush=True,
     )
+    if HOVER_TEST:
+        print(
+            "[phase1] HOVER_TEST: waypoint pinned to the start position — "
+            "altitude loop under test in isolation, no translation expected",
+            flush=True,
+        )
 
     # One step to populate the sensors before reading the start position.
     if robot.step(timestep) == -1:
@@ -496,7 +583,7 @@ def run_phase1(robot, timestep):
                 f"alt={s['altitude']:.2f} "
                 f"d={s['distance']:5.2f} "
                 f"brg={s['bearing_error']:+.3f} "
-                f"{'HOLD' if s['arrived'] else 'FLY '} | "
+                f"{'HOLD' if s['arrived'] else ('TURN' if s['turning'] else 'CRUZ')} | "
                 f"aerr={s['alt_err']:+.3f} "
                 f"I={s['integral']:+.3f} "
                 f"vin={s['vertical_input']:+.3f} "

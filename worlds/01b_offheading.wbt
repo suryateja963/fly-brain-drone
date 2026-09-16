@@ -1,0 +1,59 @@
+#VRML_SIM R2025a utf8
+
+# Phase 1 regression world: identical to 01_empty.wbt except the drone starts
+# yawed 180 degrees away from the target.
+#
+# The heading stall that TURN/CRUISE fixes only appears when the drone has a
+# real rotation to perform. Starting aligned passes by accident: bearing_error
+# is near zero from the first step, so the turn logic never runs. This world
+# forces it to run.
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
+
+WorldInfo {
+  info [
+    "Phase 1 regression world - drone starts facing AWAY from the target."
+    "Exercises the TURN/CRUISE state machine, which a nose-on start skips."
+  ]
+  title "Fly-Brain Drone - 01b off-heading"
+  basicTimeStep 8
+  defaultDamping Damping {
+    linear 0.5
+    angular 0.5
+  }
+}
+Viewpoint {
+  orientation -0.1 -0.02 0.995 2.9
+  position 6.5 -2.0 2.2
+  near 0.2
+  follow "Mavic 2 PRO"
+  followSmoothness 0.2
+}
+TexturedBackground {
+  luminosity 3
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 100 100
+  tileSize 2 2
+  appearance Parquetry {
+    type "chequered"
+  }
+}
+Mavic2Pro {
+  translation 0 0 0.1
+  rotation 0 0 1 3.14159
+  controller "fly_brain"
+  cameraSlot [
+    Camera {
+      width 400
+      height 240
+      near 0.2
+    }
+  ]
+}
